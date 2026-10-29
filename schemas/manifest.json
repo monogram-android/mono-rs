@@ -1,0 +1,30 @@
+{
+  "repository": "https://schema.jppgr.am/layers",
+  "layers": [
+    {
+      "layer": 223,
+      "url": "https://schema.jppgr.am/layers/223.tl",
+      "sha256": "9ba100ea43cb1963ae69f95f9353a7e8abaa6769929fedf842c39afb7132e719"
+    },
+    {
+      "layer": 229,
+      "url": "https://schema.jppgr.am/layers/229.tl",
+      "sha256": "c5309939182355548afac6d2f16b123dd8037157c489ee000493ab11163901a5"
+    },
+    {
+      "layer": 230,
+      "url": "https://schema.jppgr.am/layers/230.tl",
+      "sha256": "c12a6c671796142523a6e5e6a2af1dd83864f53caf732ed98b63ea455ab222ac"
+    },
+    {
+      "layer": 231,
+      "url": "https://schema.jppgr.am/layers/231.tl",
+      "sha256": "83ccd40f4e4393f32d5cd2a5bb360013a49f86f861ae10ae43085e657778c21e"
+    },
+    {
+      "layer": 232,
+      "url": "https://schema.jppgr.am/layers/232.tl",
+      "sha256": "7a1f11881d1e0f021af61c97464fec1e5d88edf9f4920950fe68e0c31c0f9947"
+    }
+  ]
+}

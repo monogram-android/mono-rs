@@ -12,7 +12,7 @@ The generated Telegram Type Language declarations come from Telegram schema snap
 | 231   | <https://schema.jppgr.am/layers/231.tl>   | `83ccd40f4e4393f32d5cd2a5bb360013a49f86f861ae10ae43085e657778c21e` |
 | 232   | <https://schema.jppgr.am/layers/232.tl>   | `7a1f11881d1e0f021af61c97464fec1e5d88edf9f4920950fe68e0c31c0f9947` |
 
-The generated declarations are retained as checked-in protocol artifacts from these snapshots. `cargo xtask test-layers` compiles and tests every supported generated layer. The repository does not currently include the former schema parser/code generator or a checked-in schema archive, so regeneration is an external maintenance step and generated declarations must not be edited by hand. The source URLs and digests below are the provenance record for the checked-in output.
+The generated declarations are retained as checked-in protocol artifacts from these snapshots. `cargo xtask verify-schemas` downloads each pinned source and verifies its SHA-256; `cargo xtask test-layers` compiles and tests every supported generated layer. The repository does not currently include a first-party source-to-Rust generator, so regeneration remains a deliberate maintenance step and generated declarations must not be edited by hand. The source URLs and digests below are the provenance record for the checked-in output.
 
 Schema-derived files keep their upstream notices and terms where they have them. The repository's GPL-3.0-only license covers original project code and contributions. It doesn't remove third-party obligations, and it doesn't relicense third-party material beyond the grants that apply to it.
 

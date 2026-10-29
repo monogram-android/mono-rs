@@ -32,6 +32,8 @@ const ENGINE_PATCH: [&str; 2] = [
     "patch.crates-io.mono-proto-engine.path=\"crates/mono-proto-engine\"",
 ];
 
+mod schemas;
+
 fn run(program: &str, arguments: &[&str]) -> Result<(), String> {
     eprintln!("+ {program} {}", arguments.join(" "));
     let status = Command::new(program)
@@ -139,7 +141,7 @@ fn ci() -> Result<(), String> {
 }
 
 fn help() {
-    eprintln!("Usage: cargo xtask <ci|package|test-layers>");
+    eprintln!("Usage: cargo xtask <ci|package|test-layers|verify-schemas>");
 }
 
 fn main() -> ExitCode {
@@ -147,6 +149,7 @@ fn main() -> ExitCode {
         Some("ci") => ci(),
         Some("package") => package(),
         Some("test-layers") => test_layers(),
+        Some("verify-schemas") => schemas::verify(),
         Some("help" | "-h" | "--help") => {
             help();
             return ExitCode::SUCCESS;

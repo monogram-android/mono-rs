@@ -1,0 +1,22 @@
+//! Instant View page mapping.
+//! https://core.telegram.org/method/messages.getWebPage
+//! https://core.telegram.org/constructor/page
+//! https://core.telegram.org/type/PageBlock
+
+mod blocks;
+mod index;
+mod rich;
+mod rpc;
+
+pub use blocks::*;
+pub use index::INSTANT_VIEW_MEDIA_MSG;
+pub use index::*;
+pub use rich::*;
+pub use rpc::*;
+
+#[cfg(test)]
+#[path = "../../tests/unit/instant_view_block_tests.rs"]
+mod block_tests;
+#[cfg(test)]
+#[path = "../../tests/unit/instant_view_page_tests.rs"]
+mod page_tests;

@@ -1,0 +1,5 @@
+[alias]
+xtask = "run --quiet -p xtask --"
+build-all = "build --workspace"
+build-layers = "build -p mono-proto --features all-layers"
+test-all = "test --workspace"

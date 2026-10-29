@@ -1,0 +1,18 @@
+[package]
+name = "mono-proto-socket"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+thiserror = "2"
+mono-proto-crypto = { path = "../mono-proto-crypto" }
+mono-proto-transport = { path = "../mono-proto-transport" }
+parking_lot = "0.12"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"
+
+[dev-dependencies]

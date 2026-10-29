@@ -1,0 +1,18 @@
+[package]
+name = "mono-proto-updates"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-only"
+publish = false
+
+[dev-dependencies]
+serde_json = "1"
+
+[dependencies]
+mono-proto = { path = "../mono-proto" }
+mono-proto-media = { path = "../mono-proto-media" }
+mono-proto-messages = { path = "../mono-proto-messages" }
+mono-proto-runtime = { path = "../mono-proto-runtime" }
+mono-proto-session = { path = "../mono-proto-session" }
+mono-proto-types = { path = "../mono-proto-types" }

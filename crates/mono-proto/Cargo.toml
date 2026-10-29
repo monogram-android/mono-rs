@@ -1,0 +1,33 @@
+[package]
+name = "mono-proto"
+version = "0.2.0+layer.232"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version.workspace = true
+description = "Generated Telegram MTProto type declarations"
+publish = false
+
+[features]
+default = ["layer-232"]
+serde = ["dep:serde", "bnum/serde"]
+bon = ["dep:bon"]
+layer-223 = []
+layer-229 = []
+layer-230 = []
+layer-231 = []
+layer-232 = []
+all-layers = ["layer-223", "layer-229", "layer-230", "layer-231", "layer-232"]
+secret-chat = ["layer-232"]
+tracing = ["mono-proto-codec/tracing"]
+dangerous-unredacted-logging = ["tracing", "mono-proto-codec/dangerous-unredacted-logging"]
+
+[dependencies]
+mono-proto-codec = { path = "../mono-proto-codec", version = "0.1.0" }
+bnum = "0.14"
+bon = { version = "=3.8.1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+thiserror = "2"
+
+[dev-dependencies]
+proptest.workspace = true
+tracing = "0.1"

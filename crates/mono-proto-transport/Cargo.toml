@@ -1,0 +1,20 @@
+[package]
+name = "mono-proto-transport"
+description = "Runtime-neutral MTProto transport framing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crc32fast.workspace = true
+getrandom.workspace = true
+mono-proto-crypto = { path = "../mono-proto-crypto", version = "0.1.0" }
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

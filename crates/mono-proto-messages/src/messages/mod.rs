@@ -1,0 +1,14 @@
+pub mod checklist_creation;
+pub mod contact_send;
+pub mod dice;
+pub mod inline_rpc;
+pub mod location_send;
+pub mod mapping;
+pub mod poll_creation;
+pub mod read;
+pub mod read_receipts_rpc;
+pub mod search;
+pub mod search_rpc;
+pub mod send;
+pub mod send_result;
+pub mod sticker_rpc;

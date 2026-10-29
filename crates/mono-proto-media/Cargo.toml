@@ -1,0 +1,20 @@
+[package]
+name = "mono-proto-media"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+aes = "0.9"
+cipher = "0.5"
+ctr = "0.10"
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mono-proto = { path = "../mono-proto" }
+mono-proto-observability = { path = "../mono-proto-observability" }
+mono-proto-runtime = { path = "../mono-proto-runtime" }
+mono-proto-session = { path = "../mono-proto-session" }
+mono-proto-types = { path = "../mono-proto-types" }

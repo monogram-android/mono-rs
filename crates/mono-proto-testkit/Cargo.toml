@@ -1,0 +1,19 @@
+[package]
+name = "mono-proto-testkit"
+description = "Deterministic fixtures and fakes for MTProto implementations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+mono-proto-codec = { path = "../mono-proto-codec", version = "0.1.0" }
+mono-proto-crypto = { path = "../mono-proto-crypto", version = "0.1.0" }
+mono-proto-engine = { path = "../mono-proto-engine", version = "0.1.0" }
+mono-proto-session = { path = "../mono-proto-session", version = "0.1.0" }
+mono-proto-transport = { path = "../mono-proto-transport", version = "0.1.0" }
+num-bigint.workspace = true
+
+[lints]
+workspace = true

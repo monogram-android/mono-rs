@@ -1,0 +1,22 @@
+[package]
+name = "mono-proto-codec"
+description = "Bounded, schema-neutral TL binary codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+tracing = ["dep:tracing"]
+dangerous-unredacted-logging = ["tracing"]
+
+[dependencies]
+bnum = "0.14"
+tracing = { version = "0.1", optional = true }
+thiserror.workspace = true
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

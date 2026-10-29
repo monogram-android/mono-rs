@@ -1,0 +1,19 @@
+[package]
+name = "mono-proto-engine"
+description = "Runtime-neutral low-level MTProto RPC engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+flate2.workspace = true
+mono-proto-codec = { path = "../mono-proto-codec", version = "0.1.0" }
+mono-proto-crypto = { path = "../mono-proto-crypto", version = "0.1.0" }
+mono-proto-session = { path = "../mono-proto-session", version = "0.1.0" }
+mono-proto-transport = { path = "../mono-proto-transport", version = "0.1.0" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

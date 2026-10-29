@@ -1,0 +1,37 @@
+[package]
+name = "mono-proto-runtime"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license = "GPL-3.0-only"
+publish = false
+
+[features]
+test-support = []
+
+[dependencies]
+aes = "0.9"
+bnum = "0.14"
+cipher = "0.5"
+flate2 = "1"
+num-bigint = "0.5"
+num-traits = "0.2"
+parking_lot = "0.12"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+serde_json = "1"
+sha2 = "0.11"
+zeroize = "1"
+mono-proto = { path = "../mono-proto" }
+mono-proto-codec = { path = "../mono-proto-codec" }
+mono-proto-crypto = { path = "../mono-proto-crypto" }
+mono-proto-engine = { path = "../mono-proto-engine" }
+mono-proto-observability = { path = "../mono-proto-observability" }
+mono-proto-storage = { path = "../mono-proto-storage" }
+mono-proto-session = { path = "../mono-proto-session" }
+mono-proto-socket = { path = "../mono-proto-socket" }
+mono-proto-transport = { path = "../mono-proto-transport" }
+mono-proto-types = { path = "../mono-proto-types" }
+
+[dev-dependencies]
+aes = "0.9"
+ctr = "0.10"

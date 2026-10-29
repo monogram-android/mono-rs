@@ -1,0 +1,17 @@
+[package]
+name = "mono-proto-session"
+description = "Explicit and persistable MTProto session state machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

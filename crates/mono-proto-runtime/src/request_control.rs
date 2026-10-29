@@ -1,0 +1,131 @@
+//! Request cancellation independent of the lifetime of a client or socket lane.
+use crate::collections::{HashMap, HashMapExt};
+use crate::tcp::ConnectionControl;
+use mono_proto_transport::Error;
+use parking_lot::Mutex;
+use std::cell::RefCell;
+use std::net::TcpStream;
+use std::sync::{
+    Arc, LazyLock,
+    atomic::{AtomicU64, Ordering},
+};
+
+static NEXT: AtomicU64 = AtomicU64::new(1);
+static REQUESTS: LazyLock<Mutex<HashMap<u64, Arc<ConnectionControl>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static PROMOTIONS: LazyLock<Mutex<HashMap<u64, u8>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+thread_local! {
+    static CURRENT: RefCell<(u64, Option<Arc<ConnectionControl>>)> = const { RefCell::new((0, None)) };
+    static SHARED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn create() -> u64 {
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    REQUESTS
+        .lock()
+        .insert(id, Arc::new(ConnectionControl::default()));
+    id
+}
+
+/// Returns the previous binding for coroutine ThreadContextElement restoration.
+pub fn bind(id: u64) -> u64 {
+    let control = if id == 0 {
+        None
+    } else {
+        Some(REQUESTS.lock().get(&id).cloned().unwrap_or_else(|| {
+            let closed = Arc::new(ConnectionControl::default());
+            closed.close();
+            closed
+        }))
+    };
+    CURRENT.with(|cell| cell.replace((id, control)).0)
+}
+
+pub fn current_id() -> u64 {
+    CURRENT.with(|cell| cell.borrow().0)
+}
+
+pub fn with_shared_binding<T>(id: u64, body: impl FnOnce() -> T) -> T {
+    struct Restore(u64, bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            bind(self.0);
+            SHARED.with(|cell| cell.set(self.1));
+        }
+    }
+    let _restore = Restore(bind(id), SHARED.with(|cell| cell.replace(true)));
+    body()
+}
+
+pub fn cancel(id: u64) {
+    let control = REQUESTS.lock().get(&id).cloned();
+    if let Some(control) = control {
+        control.close();
+    }
+}
+
+pub fn release(id: u64) {
+    REQUESTS.lock().remove(&id);
+    PROMOTIONS.lock().remove(&id);
+}
+
+pub fn promote(id: u64, class: crate::request_class::RequestClass) {
+    if !REQUESTS.lock().contains_key(&id) {
+        return;
+    }
+    let mut promotions = PROMOTIONS.lock();
+    let entry = promotions.entry(id).or_insert(class.bits());
+    let current = crate::request_class::RequestClass::from_bits(*entry);
+    if current.is_none_or(|c| class.priority() < c.priority()) {
+        *entry = class.bits();
+    }
+}
+
+pub fn promoted_class() -> Option<crate::request_class::RequestClass> {
+    let id = current_id();
+    if id == 0 {
+        return None;
+    }
+    PROMOTIONS
+        .lock()
+        .get(&id)
+        .and_then(|bits| crate::request_class::RequestClass::from_bits(*bits))
+}
+
+pub fn detach_sockets() {
+    // A finished parallel lane must not unregister the other lane's socket.
+    if SHARED.with(|cell| cell.get()) {
+        return;
+    }
+    CURRENT.with(|cell| {
+        if let Some(control) = &cell.borrow().1 {
+            control.detach_sockets();
+        }
+    });
+}
+
+pub fn check() -> Result<(), Error> {
+    while_active(|| ())
+}
+
+pub fn while_active<T>(operation: impl FnOnce() -> T) -> Result<T, Error> {
+    CURRENT
+        .with(|cell| match &cell.borrow().1 {
+            Some(control) => control.while_open(operation),
+            None => Ok(operation()),
+        })
+        .map_err(|_| Error::Connection("request cancelled".into()))
+}
+
+pub fn register(stream: &Arc<TcpStream>) -> Result<(), Error> {
+    CURRENT
+        .with(|cell| match &cell.borrow().1 {
+            Some(control) => control.register(stream),
+            None => Ok(()),
+        })
+        .map_err(|_| Error::Connection("request cancelled".into()))
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/request_control_tests.rs"]
+mod tests;

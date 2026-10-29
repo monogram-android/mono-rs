@@ -1,0 +1,26 @@
+[package]
+name = "mono-tl-parser"
+description = "Parser and syntax tree for Telegram's Type Language"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+rust-version = "1.98"
+repository = "https://github.com/monogram-android/mono-rs"
+
+[dependencies]
+serde = { version = "1", optional = true }
+thiserror = "2"
+tracing = { version = "0.1", optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+tracing = ["dep:tracing"]
+dangerous-unredacted-logging = ["tracing"]
+
+[dev-dependencies]
+insta = "1"
+proptest = "1"
+
+[lints]
+workspace = true

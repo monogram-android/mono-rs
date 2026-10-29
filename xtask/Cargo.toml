@@ -11,6 +11,8 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2.workspace = true
+mono-tl-schema = { path = "../crates/mono-tl-schema" }
+mono-tl-codegen = { path = "../crates/mono-tl-codegen" }
 
 [lints]
 workspace = true

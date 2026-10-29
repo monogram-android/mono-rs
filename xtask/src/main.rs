@@ -32,12 +32,14 @@ const ENGINE_PATCH: [&str; 2] = [
     "patch.crates-io.mono-proto-engine.path=\"crates/mono-proto-engine\"",
 ];
 
+mod generate;
 mod schemas;
 
 fn run(program: &str, arguments: &[&str]) -> Result<(), String> {
     eprintln!("+ {program} {}", arguments.join(" "));
     let status = Command::new(program)
         .args(arguments.iter().map(OsStr::new))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .status()
         .map_err(|error| format!("failed to start {program}: {error}"))?;
     if status.success() {
@@ -141,7 +143,9 @@ fn ci() -> Result<(), String> {
 }
 
 fn help() {
-    eprintln!("Usage: cargo xtask <ci|package|test-layers|verify-schemas>");
+    eprintln!(
+        "Usage: cargo xtask <ci|package|test-layers|verify-schemas|generate-schemas|check-schemas>"
+    );
 }
 
 fn main() -> ExitCode {
@@ -150,6 +154,8 @@ fn main() -> ExitCode {
         Some("package") => package(),
         Some("test-layers") => test_layers(),
         Some("verify-schemas") => schemas::verify(),
+        Some("generate-schemas") => generate::run(false),
+        Some("check-schemas") => generate::run(true),
         Some("help" | "-h" | "--help") => {
             help();
             return ExitCode::SUCCESS;

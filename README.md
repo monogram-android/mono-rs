@@ -21,11 +21,13 @@ You need Rust 1.98 or newer
 git clone https://github.com/monogram-android/mono-rs
 cd mono-rs
 
+cargo xtask verify-schemas
+cargo xtask check-schemas
 cargo xtask test-layers
 cargo test --workspace --all-features
 ```
 
-The tests use local fixtures and sockets, so no Telegram credentials are needed. The default build targets TL layer 232. To build every supported layer (223, 229, 230, 231, 232), run `cargo build-layers`
+The `mono-tl-parser`, `mono-tl-schema` and `mono-tl-codegen` crates provide the mono-rs-owned TL generation pipeline. `cargo xtask generate-schemas` regenerates the pinned API modules after verifying their SHA-256 digests; `cargo xtask check-schemas` performs the same download and fails if generated output is stale. The generator crates retain their MPL-2.0 notices.
 
 Using the client looks like this:
 

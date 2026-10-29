@@ -514,10 +514,10 @@ It archives layers newer than this checkout. A constructor found there isn't usa
 A layer bump is a protocol migration, not a dependency bump.
 
 1. Choose a schema snapshot listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md), verify its SHA-256, and keep the digest in the change record.
-2. Regenerate the declarations with an approved external TL parser/code generator and the pinned snapshots documented in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md). Preserve the generator's license and notices, and never edit generated declarations by hand.
+2. Add the new pinned snapshot and its digest to the schema manifest. Regenerate declarations with `cargo xtask generate-schemas`, which verifies the snapshot digest before parsing and emitting Rust; preserve the generator crates' MPL-2.0 notices and never edit generated declarations by hand.
 3. Copy the generated layer modules into the `mono-proto` crate. Update its default and latest feature and the Cargo locks, and keep the older layers.
 4. Compile the workspace and add explicit handling for every new or changed variant in the owning library modules. A host adapter regenerates its own bindings separately if its exported surface changes.
-5. Run the generator freshness, host, transport and wrapper tests, and check that `mono-proto::LATEST_API_LAYER` reports the new layer.
+5. Run `cargo xtask check-schemas`, `cargo xtask test-layers`, the host, transport and wrapper tests, and check that `mono-proto::LATEST_API_LAYER` reports the new layer.
 6. Make sure stored login identity and update cursors still restore. Never drop them to make a build pass.
 
 ## Maintenance

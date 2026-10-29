@@ -1,0 +1,34 @@
+[package]
+name = "mono-tl-codegen"
+description = "Deterministic Rust generator for validated TL schemas"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+rust-version = "1.98"
+repository = "https://github.com/monogram-android/mono-rs"
+# Repository freshness tests require schemas and generated files outside this package.
+exclude = ["tests/current_generated.rs"]
+
+[dependencies]
+heck = "0.5"
+prettyplease = "0.3"
+syn = { version = "3", features = ["full"] }
+thiserror = "2"
+mono-tl-schema = { version = "0.1.0", path = "../mono-tl-schema" }
+tracing = { version = "0.1", optional = true }
+
+[features]
+default = []
+tracing = ["dep:tracing", "mono-tl-schema/tracing"]
+dangerous-unredacted-logging = ["tracing", "mono-tl-schema/dangerous-unredacted-logging"]
+
+[dev-dependencies]
+pretty_assertions = "1"
+tempfile = "3"
+
+[[bin]]
+name = "mono-tl-codegen"
+path = "src/main.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+[package]
+name = "mono-tl-schema"
+description = "Validated language-neutral model for TL schemas"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+rust-version = "1.98"
+repository = "https://github.com/monogram-android/mono-rs"
+# Repository freshness tests require checked-in schemas outside this package.
+exclude = ["tests/current_schema.rs"]
+
+[dependencies]
+crc32fast = "1.4"
+schemars = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+mono-tl-parser = { version = "0.1.0", path = "../mono-tl-parser" }
+tracing = { version = "0.1", optional = true }
+
+[features]
+default = []
+tracing = ["dep:tracing", "mono-tl-parser/tracing"]
+dangerous-unredacted-logging = ["tracing", "mono-tl-parser/dangerous-unredacted-logging"]
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

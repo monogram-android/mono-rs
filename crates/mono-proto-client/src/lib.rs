@@ -5,6 +5,20 @@ pub use mono_proto_messages::messages::{
     location_send::LocationSendSpec, poll_creation::PollSendSpec,
 };
 pub use mono_proto_runtime::send_options::SendOptions;
+pub mod adapter {
+    pub use mono_proto as protocol;
+    pub use mono_proto_media as media;
+    pub use mono_proto_messages as messages;
+    pub use mono_proto_observability as observability;
+    pub use mono_proto_runtime as runtime;
+    pub use mono_proto_session as session;
+    pub use mono_proto_socket as socket;
+    pub use mono_proto_storage as storage;
+    pub use mono_proto_transport as transport;
+    pub use mono_proto_types as types;
+    pub use mono_proto_updates as updates;
+}
+
 pub use mono_proto_types::{
     MtprotoError, collections::CompactString, dto_types::*, event_types::*, message_types::*,
 };

@@ -26,3 +26,5 @@ mono-proto-media = { path = "../mono-proto-media" }
 mono-proto-runtime = { path = "../mono-proto-runtime" }
 mono-proto-session = { path = "../mono-proto-session" }
 mono-proto-storage = { path = "../mono-proto-storage" }
+mono-proto-observability = { path = "../mono-proto-observability" }
+mono-proto-socket = { path = "../mono-proto-socket" }

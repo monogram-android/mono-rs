@@ -179,6 +179,10 @@ impl TransferPolicy {
             .store(normalize_file_part_kib(kib), Ordering::Relaxed);
     }
 
+    pub fn progress_callback(&self) -> Option<ProgressCallback> {
+        self.progress.read().clone()
+    }
+
     pub fn assign_progress(&self, callback: Option<ProgressCallback>) {
         *self.progress.write() = callback;
     }

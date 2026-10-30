@@ -6,17 +6,38 @@ pub use mono_proto_messages::messages::{
 };
 pub use mono_proto_runtime::send_options::SendOptions;
 pub mod adapter {
-    pub use mono_proto as protocol;
-    pub use mono_proto_media as media;
-    pub use mono_proto_messages as messages;
-    pub use mono_proto_observability as observability;
-    pub use mono_proto_runtime as runtime;
-    pub use mono_proto_session as session;
-    pub use mono_proto_socket as socket;
-    pub use mono_proto_storage as storage;
-    pub use mono_proto_transport as transport;
-    pub use mono_proto_types as types;
-    pub use mono_proto_updates as updates;
+    pub mod protocol {
+        pub use mono_proto::LATEST_API_LAYER;
+        pub use mono_proto::latest;
+    }
+    pub mod media {
+        pub use mono_proto_media::{location, profile, wallpaper};
+    }
+    pub mod messages {
+        pub use mono_proto_messages::{
+            contacts, extras_rpc, instant_view, messages_checklist_creation, messages_contact_send,
+            messages_location_send, messages_poll_creation, messages_read_receipts_rpc,
+            messages_send_result, notifications, upload_rpc,
+        };
+    }
+    pub mod runtime {
+        pub use mono_proto_runtime::{
+            api_invoke, connection, request_control, scheduler, send_options, transfer_policy,
+            transfer_window,
+        };
+    }
+    pub mod observability {
+        pub use mono_proto_observability::perf;
+    }
+    pub mod socket {
+        pub use mono_proto_socket::{ProxyConfig, ProxyKind, TransportMode};
+    }
+    pub mod types {
+        pub use mono_proto_types::{
+            auth_types, collections, dto_types, error, event_types, init_connection, message_types,
+            updates_state,
+        };
+    }
 }
 
 pub use mono_proto_types::{

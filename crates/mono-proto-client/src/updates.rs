@@ -4,6 +4,9 @@ mod outgoing_receipts_tests;
 #[cfg(test)]
 #[path = "../tests/unit/update_journal_tests.rs"]
 mod update_journal_tests;
+#[cfg(test)]
+#[path = "../tests/unit/update_lane_admission_tests.rs"]
+mod update_lane_admission_tests;
 
 use crate::access::{interactive_request_pending, with_client_transport, with_read_lane};
 use crate::client::Client;
@@ -105,12 +108,40 @@ pub fn lock_updates_lane(
     )>,
     MtprotoError,
 > {
-    // Updates share the home transport with main RPCs. Taking the same gate as
-    // request batches prevents a just-freed media batch from barging ahead.
-    let gate = client
+    lock_updates_lane_with(client, || {})
+}
+
+fn lock_updates_lane_with(
+    client: &Client,
+    after_pending_check: impl FnOnce(),
+) -> Result<
+    Option<(
+        scheduler::LaneGuard<'_>,
+        parking_lot::MutexGuard<'_, SessionIo>,
+    )>,
+    MtprotoError,
+> {
+    // Background recovery must not wait ahead of interactive reads. If the lane is busy or an
+    // interactive waiter is queued, the next loop retries after the request gets service.
+    if interactive_request_pending(client) {
+        return Ok(None);
+    }
+    after_pending_check();
+    let Some(gate) = client
         .main_gate
-        .acquire(scheduler::RequestClass::BackgroundRead)?;
-    Ok(client.main.try_lock().map(|io| (gate, io)))
+        .try_acquire(scheduler::RequestClass::BackgroundRead)
+    else {
+        return Ok(None);
+    };
+    if interactive_request_pending(client) {
+        drop(gate);
+        return Ok(None);
+    }
+    let Some(io) = client.main.try_lock() else {
+        drop(gate);
+        return Ok(None);
+    };
+    Ok(Some((gate, io)))
 }
 
 fn batch_dto(generation: i64, batch: &DurableBatch) -> UpdateBatchDto {

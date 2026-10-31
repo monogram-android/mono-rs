@@ -22,7 +22,7 @@ use crate::session::{
     is_unrecoverable_session, mark_lane_session_dead, temporary_key_retry_error,
 };
 use crate::state::ClientState;
-use mono_proto_runtime::{scheduler, tcp};
+use mono_proto_runtime::{request_control, scheduler, tcp};
 use mono_proto_storage::client_session::ChannelRecovery;
 use mono_proto_storage::update_journal::{DurableBatch, is_durable};
 use mono_proto_types::MtprotoError;
@@ -33,6 +33,15 @@ use mono_proto_types::peers::channel_id_from_chat_id;
 use mono_proto_types::updates_state::UpdatesStateDto;
 use mono_proto_updates::{recovery::*, rpc as updates_rpc};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+struct ActiveUpdateRequest<'a>(&'a AtomicU64);
+
+impl Drop for ActiveUpdateRequest<'_> {
+    fn drop(&mut self) {
+        self.0.store(0, Ordering::Release);
+    }
+}
 
 #[cfg(any(test, feature = "test-support"))]
 std::thread_local! {
@@ -278,6 +287,11 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
     let Some((gate, mut io)) = lock_updates_lane(&client)? else {
         return Ok(UpdateDrainDto::default());
     };
+    let active_request = request_control::current_id();
+    client
+        .active_update_request
+        .store(active_request, Ordering::Release);
+    let _active_request = ActiveUpdateRequest(&client.active_update_request);
     let now = recovery_now();
     let (
         api_id,

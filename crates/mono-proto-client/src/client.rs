@@ -25,4 +25,5 @@ pub struct Client {
     pub persist_running: AtomicBool,
     pub persist_exhausted: AtomicBool,
     pub interactive_waiters: AtomicU64,
+    pub active_update_request: AtomicU64,
 }

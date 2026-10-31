@@ -212,6 +212,7 @@ pub fn create_client(api_id: i32, api_hash: String, session_path: String) -> u64
             persist_running: AtomicBool::new(false),
             persist_exhausted: AtomicBool::new(false),
             interactive_waiters: AtomicU64::new(0),
+            active_update_request: AtomicU64::new(0),
         }),
     );
     handle

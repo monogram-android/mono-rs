@@ -8,7 +8,7 @@ use crate::session::{
     temporary_key_failure, temporary_key_retry_error,
 };
 use crate::state::{ClientData, ClientState};
-use mono_proto_runtime::{scheduler, tcp};
+use mono_proto_runtime::{request_control, scheduler, tcp};
 use mono_proto_session::{OsRandom, Snapshot};
 use mono_proto_types::MtprotoError;
 use std::cell::Cell;
@@ -17,6 +17,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn interactive_request_pending(client: &Client) -> bool {
     client.interactive_waiters.load(Ordering::Acquire) != 0
+}
+
+fn cancel_active_update(client: &Client) {
+    let request_id = client.active_update_request.load(Ordering::Acquire);
+    if request_id != 0 {
+        request_control::cancel(request_id);
+    }
 }
 
 pub struct InteractiveWaiter<'a>(pub &'a AtomicU64);
@@ -74,6 +81,7 @@ pub fn with_client_mut_binding<T>(
     let _waiter = match class {
         scheduler::RequestClass::InteractiveRead | scheduler::RequestClass::InteractiveWrite => {
             client.interactive_waiters.fetch_add(1, Ordering::AcqRel);
+            cancel_active_update(&client);
             Some(InteractiveWaiter(&client.interactive_waiters))
         }
         _ => None,

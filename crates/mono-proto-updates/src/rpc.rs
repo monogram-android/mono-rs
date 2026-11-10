@@ -585,6 +585,18 @@ pub fn collect_other_updates<'a>(
     }
 }
 
+fn apply_difference_too_long(
+    cursor: &mut UpdatesStateDto,
+    pts: i32,
+    events: &mut Vec<UpdateEventDto>,
+) {
+    cursor.pts = pts;
+    events.push(UpdateEventDto::Ignored {
+        kind: "difference_too_long".into(),
+    });
+    events.push(UpdateEventDto::ChatsChanged);
+}
+
 pub fn drain_difference(
     snapshot: &mut Snapshot,
     api_id: i32,
@@ -662,15 +674,7 @@ pub fn drain_difference(
             }
         }
         UpdatesDifference::UpdatesDifferenceTooLong(t) => {
-            cursor.pts = t.pts;
-            // The server has compacted the missing update range. The cursor
-            // is now authoritative, but the open dialog needs a bounded
-            // history refresh to refill messages that cannot be reconstructed
-            // from the difference response.
-            events.push(UpdateEventDto::Ignored {
-                kind: "difference_too_long".into(),
-            });
-            events.push(UpdateEventDto::ChatsChanged);
+            apply_difference_too_long(cursor, t.pts, &mut events);
         }
         _ => {}
     }
@@ -717,6 +721,16 @@ pub fn drain_channel_difference(
     };
     let response: UpdatesChannelDifference =
         api_invoke::invoke_api_allow_updates(snapshot, api_id, request)?;
+    Ok(apply_channel_difference_response(peers, media_index, chat_id, pts, response))
+}
+
+fn apply_channel_difference_response(
+    peers: &mut HashMap<i64, CachedPeer>,
+    media_index: &mut MediaIndex,
+    chat_id: i64,
+    pts: i32,
+    response: UpdatesChannelDifference,
+) -> ChannelDifferencePage {
     let mut events = Vec::new();
     let mut next_pts = pts.max(1);
     let (mut final_page, mut timeout) = (false, None);
@@ -761,30 +775,31 @@ pub fn drain_channel_difference(
                 vector_boxed_items(&t.users).cloned(),
                 vector_boxed_items(&t.chats).cloned(),
             );
-            let mut n = 0_i32;
-            for msg in vector_boxed_items(&t.messages) {
-                if let Some(dto) = message_to_dto(msg, media_index) {
-                    events.push(UpdateEventDto::NewMessage { message: dto });
-                    n += 1;
-                }
-            }
             if let Dialog::Dialog(d) = t.dialog.as_ref() {
                 if let Some(p) = d.pts {
                     next_pts = p;
                 }
             }
-            next_pts = next_channel_pts_after_too_long(pts, next_pts, n);
+            next_pts = next_channel_pts_after_too_long(pts, next_pts, 0);
+            events.push(UpdateEventDto::Ignored {
+                kind: format!("channel_difference_too_long:{chat_id}"),
+            });
             events.push(UpdateEventDto::ChatsChanged);
+            for msg in vector_boxed_items(&t.messages) {
+                if let Some(dto) = message_to_dto(msg, media_index) {
+                    events.push(UpdateEventDto::NewMessage { message: dto });
+                }
+            }
         }
         _ => {}
     }
-    Ok(ChannelDifferencePage {
+    ChannelDifferencePage {
         events,
         pts: next_pts,
         final_page,
         timeout,
         pending_channels,
-    })
+    }
 }
 
 /// Message count is not a pts delta. Only server state can advance the cursor.

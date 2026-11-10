@@ -91,6 +91,65 @@ fn cloud_draft_changes_are_typed_serializable_events_instead_of_ignored_updates(
 }
 
 #[test]
+fn difference_too_long_advances_authoritative_pts_and_emits_cache_invalidation() {
+    let mut state = cursor();
+    state.pts = 10;
+    state.qts = 7;
+    state.date = 100;
+    state.seq = 3;
+
+    let mut events = Vec::new();
+    apply_difference_too_long(&mut state, 42, &mut events);
+
+    assert_eq!((state.pts, state.qts, state.date, state.seq), (42, 7, 100, 3));
+    assert!(matches!(
+        events.as_slice(),
+        [
+            UpdateEventDto::Ignored { kind },
+            UpdateEventDto::ChatsChanged,
+        ] if kind == "difference_too_long"
+    ));
+}
+
+#[test]
+fn channel_too_long_response_invalidates_before_recovered_messages() {
+    use mono_proto::codec::{Boxed, Decoder, Limits, TlDecode};
+    use mono_proto::latest::api::{
+        DialogConstructor, MessageActionHistoryClearConstructor, MessageServiceConstructor,
+        PeerChannelConstructor, PeerNotifySettingsConstructor,
+        UpdatesChannelDifferenceTooLongConstructor,
+    };
+    let words: Vec<u32> = vec![
+        UpdatesChannelDifferenceTooLongConstructor::ID, 3, 30,
+        DialogConstructor::ID, 1, PeerChannelConstructor::ID, 7, 0,
+        41, 0, 0, 1, 0, 0, 0, PeerNotifySettingsConstructor::ID, 0, 40,
+        VectorConstructor::<Box<Message>>::ID, 1,
+        MessageServiceConstructor::ID, 0, 41, PeerChannelConstructor::ID, 7, 0,
+        100, MessageActionHistoryClearConstructor::ID,
+        VectorConstructor::<Box<mono_proto::latest::api::Chat>>::ID, 0,
+        VectorConstructor::<Box<mono_proto::latest::api::User>>::ID, 0,
+    ];
+    let bytes: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
+    let mut decoder = Decoder::new(&bytes, Limits::default()).unwrap();
+    let response = UpdatesChannelDifference::decode(&mut decoder).unwrap();
+    decoder.finish().unwrap();
+    let chat_id = chat_id_for_channel(7);
+    let page = apply_channel_difference_response(
+        &mut HashMap::new(), &mut MediaIndex::default(), chat_id, 10, response,
+    );
+    assert_eq!(page.pts, 40);
+    assert!(page.final_page);
+    assert_eq!(page.timeout, Some(30));
+    assert!(page.pending_channels.is_empty());
+    assert!(matches!(page.events.as_slice(), [
+        UpdateEventDto::Ignored { kind },
+        UpdateEventDto::ChatsChanged,
+        UpdateEventDto::NewMessage { message },
+    ] if kind == &format!("channel_difference_too_long:{chat_id}")
+        && message.chat_id == chat_id && message.id == 41));
+}
+
+#[test]
 fn too_long_uses_higher_dialog_pts() {
     assert_eq!(next_channel_pts_after_too_long(10, 40, 3), 40);
 }

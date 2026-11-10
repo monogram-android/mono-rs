@@ -26,7 +26,8 @@ impl FileSessionStore {
     }
 
     pub fn clear(&self) -> Result<(), SessionError> {
-        self.inner().clear()
+        mono_proto_runtime::tcp::while_client_open(|| self.inner().clear())
+            .map_err(|_| SessionError::Persistence("client closed".into()))?
     }
 
     fn inner(&self) -> mono_proto_storage::session_store::FileSessionStore {

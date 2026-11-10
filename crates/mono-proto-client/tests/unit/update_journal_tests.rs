@@ -15,6 +15,91 @@ fn message_event(id: i32) -> UpdateEventDto {
     }
 }
 
+fn new_message(chat_id: i64, id: i32) -> UpdateEventDto {
+    UpdateEventDto::NewMessage {
+        message: serde_json::from_value(serde_json::json!({
+            "chat_id": chat_id,
+            "id": id,
+            "text": "fixture",
+            "date": 100,
+            "outgoing": true,
+            "noforwards": false,
+            "supports_streaming": false,
+            "replies_count": 0,
+            "forum_topic": false
+        }))
+        .unwrap(),
+    }
+}
+
+fn invalidation(kind: &str) -> UpdateEventDto {
+    UpdateEventDto::Ignored { kind: kind.into() }
+}
+
+#[test]
+fn global_invalidation_resets_seen_at_its_position() {
+    let mut seen = super::HashSet::default();
+    seen.insert((7, 1));
+    seen.insert((8, 1));
+    let mut events = vec![
+        new_message(7, 1),
+        new_message(7, 2),
+        invalidation("difference_too_long"),
+        new_message(7, 1),
+        new_message(8, 1),
+        new_message(7, 1),
+        UpdateEventDto::ChatsChanged,
+        UpdateEventDto::ChatsChanged,
+    ];
+
+    super::filter_update_events(&mut events, &mut seen);
+
+    assert!(matches!(
+        events.as_slice(),
+        [UpdateEventDto::NewMessage { message: before },
+         UpdateEventDto::Ignored { kind },
+         UpdateEventDto::NewMessage { message: first },
+         UpdateEventDto::NewMessage { message: second },
+         UpdateEventDto::ChatsChanged]
+            if (before.chat_id, before.id) == (7, 2)
+                && kind == "difference_too_long"
+                && (first.chat_id, first.id) == (7, 1)
+                && (second.chat_id, second.id) == (8, 1)
+    ));
+    assert_eq!(seen.len(), 2);
+    assert!(seen.contains(&(7, 1)) && seen.contains(&(8, 1)));
+}
+
+#[test]
+fn channel_invalidation_only_resets_selected_chat() {
+    let mut seen = super::HashSet::default();
+    seen.insert((-1007, 1));
+    seen.insert((-1008, 1));
+    let mut events = vec![
+        new_message(-1007, 1),
+        invalidation("channel_difference_too_long:not-a-chat"),
+        new_message(-1007, 1),
+        invalidation("channel_difference_too_long:-1007"),
+        new_message(-1008, 1),
+        new_message(-1007, 1),
+        new_message(-1007, 1),
+    ];
+
+    super::filter_update_events(&mut events, &mut seen);
+
+    assert!(matches!(
+        events.as_slice(),
+        [UpdateEventDto::Ignored { kind: invalid },
+         UpdateEventDto::Ignored { kind: marker },
+         UpdateEventDto::NewMessage { message }]
+            if invalid == "channel_difference_too_long:not-a-chat"
+                && marker == "channel_difference_too_long:-1007"
+                && (message.chat_id, message.id) == (-1007, 1)
+    ));
+    assert_eq!(seen.len(), 2);
+    assert!(seen.contains(&(-1007, 1)) && seen.contains(&(-1008, 1)));
+}
+
 fn cursor(pts: i32) -> Option<UpdatesStateDto> {
     Some(UpdatesStateDto {
         pts,

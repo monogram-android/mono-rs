@@ -149,7 +149,9 @@ pub fn with_client_mut_binding<T>(
     if !temp_failed && !state.session_dead {
         if let Err(error) = &result {
             if kills_session(state.user_id, error) {
-                mark_session_dead(&mut state, error);
+                tcp::with_connection_control(&client.connections, || {
+                    mark_session_dead(&mut state, error);
+                });
             }
         }
     }

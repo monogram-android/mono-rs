@@ -27,6 +27,57 @@ fn encrypted_client_restores_session_and_rejects_wrong_key() {
 }
 
 #[test]
+fn encrypted_accounts_keep_peer_hashes_and_cursors_separate_after_restart() {
+    use mono_proto_types::peers::{CachedPeer, PeerKind};
+    let directory = std::env::temp_dir().join(format!(
+        "mono-account-isolation-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let first_path = directory.join("first.json").to_string_lossy().into_owned();
+    let second_path = directory.join("second.json").to_string_lossy().into_owned();
+    let first = create_encrypted_client(1, "test".into(), first_path.clone(), vec![11; 32]).unwrap();
+    let second = create_encrypted_client(1, "test".into(), second_path.clone(), vec![22; 32]).unwrap();
+    for (handle, user, hash, pts) in [(first, 11, 111, 10), (second, 22, 222, 20)] {
+        let client = get_client(handle).unwrap();
+        let mut data = client.data.lock();
+        data.user_id = Some(user);
+        data.peers.insert(7, CachedPeer {
+            kind: PeerKind::User,
+            id: 7,
+            access_hash: hash,
+            min_hash: false,
+        });
+        data.channel_pts.insert(-1_000_000_000_007, pts);
+        data.seen_messages.insert((7, 41));
+        data.persist_epoch += 1;
+    }
+    destroy_client(first);
+    assert!(client_exists(second));
+    assert_eq!(get_client(second).unwrap().data.lock().peers[&7].access_hash, 222);
+    destroy_client(second);
+    let first = create_encrypted_client(1, "test".into(), first_path, vec![11; 32]).unwrap();
+    let second = create_encrypted_client(1, "test".into(), second_path, vec![22; 32]).unwrap();
+    for (handle, user, hash, pts) in [(first, 11, 111, 10), (second, 22, 222, 20)] {
+        let client = get_client(handle).unwrap();
+        let data = client.data.lock();
+        assert_eq!(data.user_id, Some(user));
+        assert_eq!(data.peers[&7].access_hash, hash);
+        assert_eq!(data.channel_pts[&-1_000_000_000_007], pts);
+        assert!(data.seen_messages.contains(&(7, 41)));
+    }
+    get_client(first).unwrap().data.lock().peers.clear();
+    assert_eq!(get_client(second).unwrap().data.lock().peers[&7].access_hash, 222);
+    destroy_client(first);
+    destroy_client(second);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn client_lifecycle_persists_and_restores_session_identity() {
     let dir = std::env::temp_dir().join(format!("mono-client-lifecycle-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

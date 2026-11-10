@@ -73,14 +73,18 @@ pub fn is_durable(event: &UpdateEventDto) -> bool {
 
 /// `Ignored` carries a few state mutations encoded in `kind`; the rest are noise.
 fn is_durable_ignored(kind: &str) -> bool {
-    [
-        "dialog_unread_mark:",
-        "notify_settings:",
-        "unread_mentions_delta:",
-        "unread_reactions_delta:",
-    ]
-    .iter()
-    .any(|prefix| kind.starts_with(prefix))
+    kind == "difference_too_long"
+        || kind
+            .strip_prefix("channel_difference_too_long:")
+            .is_some_and(|id| id.parse::<i64>().is_ok())
+        || [
+            "dialog_unread_mark:",
+            "notify_settings:",
+            "unread_mentions_delta:",
+            "unread_reactions_delta:",
+        ]
+        .iter()
+        .any(|prefix| kind.starts_with(prefix))
 }
 
 impl UpdateJournal {

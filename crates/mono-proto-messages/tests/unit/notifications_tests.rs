@@ -59,7 +59,7 @@ fn invalid_token_type_is_rejected_without_network() {
 fn decrypt_round_trip_encrypted_fcm_p() {
     let secret = vec![0x42_u8; 256];
     let json =
-        r#"{"loc_key":"MESSAGE_TEXT","loc_args":["Ada","hi"],"custom":{"from_id":7,"msg_id":9}}"#;
+        r#"{"loc_key":"MESSAGE_TEXT","loc_args":["Ada","hi"],"user_id":"22","custom":{"from_id":7,"msg_id":9}}"#;
     let payload = encrypt_push_payload_for_test(&secret, json).expect("encrypt");
     let out = decrypt_push_payload(secret, payload).expect("decrypt");
     assert_eq!(out, json);

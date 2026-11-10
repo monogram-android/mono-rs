@@ -259,6 +259,55 @@ pub fn acknowledge_update_batch(
     Ok(())
 }
 
+fn filter_update_events(events: &mut Vec<UpdateEventDto>, seen_messages: &mut HashSet<(i64, i32)>) {
+    let mut saw_chats = false;
+    if seen_messages.len() > 4_000 {
+        seen_messages.clear();
+    }
+    events.retain(|event| match event {
+        UpdateEventDto::ChatsChanged if saw_chats => false,
+        UpdateEventDto::ChatsChanged => {
+            saw_chats = true;
+            true
+        }
+        UpdateEventDto::NewMessage { message } => {
+            seen_messages.insert((message.chat_id, message.id))
+        }
+        UpdateEventDto::MessageEdited { message } => {
+            seen_messages.insert((message.chat_id, message.id));
+            true
+        }
+        UpdateEventDto::MessagesDeleted {
+            chat_id,
+            message_ids,
+        } => {
+            let inferred_chat = *chat_id;
+            for message_id in message_ids {
+                if let Some(chat) = inferred_chat {
+                    seen_messages.remove(&(chat, *message_id));
+                } else {
+                    seen_messages.retain(|(_, id)| id != message_id);
+                }
+            }
+            true
+        }
+        UpdateEventDto::Ignored { kind } if kind == "difference_too_long" => {
+            seen_messages.clear();
+            true
+        }
+        UpdateEventDto::Ignored { kind } => {
+            if let Some(chat_id) = kind
+                .strip_prefix("channel_difference_too_long:")
+                .and_then(|value| value.parse::<i64>().ok())
+            {
+                seen_messages.retain(|(chat, _)| *chat != chat_id);
+            }
+            true
+        }
+        _ => true,
+    });
+}
+
 pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
     let client = get_client(handle)?;
     if interactive_request_pending(&client) {
@@ -641,39 +690,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                 }
             }
         }
-        let mut saw_chats = false;
-        if seen_messages.len() > 4_000 {
-            seen_messages.clear();
-        }
-        events.retain(|event| match event {
-            UpdateEventDto::ChatsChanged if saw_chats => false,
-            UpdateEventDto::ChatsChanged => {
-                saw_chats = true;
-                true
-            }
-            UpdateEventDto::NewMessage { message } => {
-                seen_messages.insert((message.chat_id, message.id))
-            }
-            UpdateEventDto::MessageEdited { message } => {
-                seen_messages.insert((message.chat_id, message.id));
-                true
-            }
-            UpdateEventDto::MessagesDeleted {
-                chat_id,
-                message_ids,
-            } => {
-                let inferred_chat = *chat_id;
-                for message_id in message_ids {
-                    if let Some(chat) = inferred_chat {
-                        seen_messages.remove(&(chat, *message_id));
-                    } else {
-                        seen_messages.retain(|(_, id)| id != message_id);
-                    }
-                }
-                true
-            }
-            _ => true,
-        });
+        filter_update_events(&mut events, &mut seen_messages);
         Ok((
             events,
             Some(AppliedDrain {

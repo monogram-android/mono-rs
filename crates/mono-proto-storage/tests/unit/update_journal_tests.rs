@@ -75,6 +75,66 @@ fn account_reset_drops_batches_and_changes_generation() {
 }
 
 #[test]
+fn difference_invalidation_is_durable_and_replays_in_order() {
+    let durable = [
+        "difference_too_long",
+        "channel_difference_too_long:-9223372036854775808",
+        "channel_difference_too_long:9223372036854775807",
+        "dialog_unread_mark:7",
+    ];
+    let ignored = [
+        "difference_too_long:1",
+        "channel_difference_too_long",
+        "channel_difference_too_long:",
+        "channel_difference_too_long:abc",
+        "channel_difference_too_long:1:2",
+        "channel_difference_too_long:9223372036854775808",
+        "unrelated",
+    ];
+    for (kinds, expected) in [(&durable[..], true), (&ignored[..], false)] {
+        for &kind in kinds {
+            assert_eq!(
+                is_durable(&UpdateEventDto::Ignored { kind: kind.into() }),
+                expected,
+                "{kind}"
+            );
+        }
+    }
+
+    let mut journal = UpdateJournal::default();
+    let first = journal.push(
+        vec![UpdateEventDto::Ignored {
+            kind: durable[0].into(),
+        }],
+        cursor(42),
+        vec![],
+    );
+    let second = journal.push(
+        vec![UpdateEventDto::Ignored {
+            kind: durable[1].into(),
+        }],
+        None,
+        vec![(-1, 43)],
+    );
+    journal.mark_all_delivered();
+    let encoded = serde_json::to_vec(&journal).unwrap();
+    let restored: UpdateJournal = serde_json::from_slice(&encoded).unwrap();
+    assert!(restored.has_undelivered());
+    let replay = restored.pending();
+    assert_eq!(replay.len(), 2);
+    assert_eq!(replay[0].batch_id, first.batch_id);
+    assert_eq!(replay[1].batch_id, second.batch_id);
+    assert!(
+        matches!(&replay[0].events[..], [UpdateEventDto::Ignored { kind }] if kind == durable[0])
+    );
+    assert!(
+        matches!(&replay[1].events[..], [UpdateEventDto::Ignored { kind }] if kind == durable[1])
+    );
+    assert_eq!(replay[0].cursor_after.as_ref().unwrap().pts, 42);
+    assert_eq!(replay[1].channel_pts_after, vec![(-1, 43)]);
+}
+
+#[test]
 fn only_state_mutations_are_durable() {
     assert!(is_durable(&message_event(1)));
     assert!(is_durable(&UpdateEventDto::ChatsChanged));

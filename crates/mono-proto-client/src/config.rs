@@ -40,11 +40,10 @@ pub fn schedule_transfer_config(handle: u64) {
                     })
                 })
             });
-            if result.is_err() {
-                if let Some(client) = weak.upgrade() {
+            if result.is_err()
+                && let Some(client) = weak.upgrade() {
                     client.policy.config_due.store(now + 60, Ordering::Release);
                 }
-            }
         });
     if spawned.is_err() {
         client.policy.config_due.store(now + 60, Ordering::Release);

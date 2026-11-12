@@ -146,15 +146,13 @@ pub fn with_client_mut_binding<T>(
         .as_ref()
         .err()
         .is_some_and(|err| temporary_key_failure(&state, err));
-    if !temp_failed && !state.session_dead {
-        if let Err(error) = &result {
-            if kills_session(state.user_id, error) {
+    if !temp_failed && !state.session_dead
+        && let Err(error) = &result
+            && kills_session(state.user_id, error) {
                 tcp::with_connection_control(&client.connections, || {
                     mark_session_dead(&mut state, error);
                 });
             }
-        }
-    }
     if temp_failed {
         expire_temporary_lane(&client, &mut io, result.as_ref().err().unwrap());
         state.temp_expires_at = 1;

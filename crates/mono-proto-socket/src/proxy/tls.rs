@@ -1,7 +1,7 @@
 use crate::{ProxyConfig, ProxyError};
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, StreamOwned};
-use rustls_platform_verifier::ConfigVerifierExt;
+use rustls_platform_verifier::BuilderVerifierExt;
 use std::net::TcpStream;
 use std::sync::Arc;
 
@@ -12,8 +12,12 @@ pub(crate) fn connect(
     proxy: &ProxyConfig,
     timeout: std::time::Duration,
 ) -> Result<TlsStream, ProxyError> {
-    let config = ClientConfig::with_platform_verifier()
-        .map_err(|error| ProxyError::Tls(format!("TLS verifier setup failed: {error}")))?;
+    let config =
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .and_then(|builder| builder.with_platform_verifier())
+            .map_err(|error| ProxyError::Tls(format!("TLS verifier setup failed: {error}")))?
+            .with_no_client_auth();
     connect_with_config(stream, proxy, timeout, config)
 }
 

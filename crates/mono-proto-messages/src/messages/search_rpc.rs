@@ -15,7 +15,7 @@ use mono_proto_session::Snapshot;
 use crate::api_invoke;
 use crate::dialogs;
 use crate::media::MediaIndex;
-use crate::messages_search::clamp_search_limit;
+use crate::messages_search::{clamp_search_limit, messages_filter};
 use crate::peers::{self, CachedPeer, input_peer_from_cached, peer_chat_id, vector_boxed_items};
 use crate::{ContactsSearchDto, GlobalMessageSearchDto, MessageDto, MtprotoError, SearchPeerDto};
 
@@ -106,26 +106,46 @@ pub fn search_global(
     limit: i32,
     folder_id: i32,
 ) -> Result<GlobalMessageSearchDto, MtprotoError> {
-    let offset_peer = offset_input_peer(peers, offset_peer_id)?;
-    let (flags, folder_id) = search_global_folder(folder_id);
-    let request = MessagesSearchGlobalRequest {
-        flags,
-        broadcasts_only: None,
-        groups_only: None,
-        users_only: None,
-        folder_id,
-        community: None,
-        q: query.to_string(),
-        filter: Box::new(MessagesFilter::InputMessagesFilterEmpty(
-            InputMessagesFilterEmptyConstructor {},
-        )),
-        min_date: 0,
-        max_date: 0,
+    search_global_filtered(
+        snapshot,
+        api_id,
+        peers,
+        media,
+        query,
+        "",
         offset_rate,
-        offset_peer: Box::new(offset_peer),
+        offset_peer_id,
         offset_id,
-        limit: clamp_search_limit(limit),
-    };
+        limit,
+        folder_id,
+    )
+}
+
+/// Search globally with an existing media filter name. Pinned and unknown filters
+/// are rejected because they are not supported by the global search method.
+pub fn search_global_filtered(
+    snapshot: &mut Snapshot,
+    api_id: i32,
+    peers: &mut HashMap<i64, CachedPeer>,
+    media: &mut MediaIndex,
+    query: &str,
+    filter: &str,
+    offset_rate: i32,
+    offset_peer_id: i64,
+    offset_id: i32,
+    limit: i32,
+    folder_id: i32,
+) -> Result<GlobalMessageSearchDto, MtprotoError> {
+    let request = global_search_request(
+        peers,
+        query,
+        filter,
+        offset_rate,
+        offset_peer_id,
+        offset_id,
+        limit,
+        folder_id,
+    )?;
     let response: mono_proto::latest::api::MessagesMessages =
         api_invoke::invoke_api(snapshot, api_id, request)?;
     let (messages, next_rate, _) = dialogs::dtos_from_messages_page(response, peers, media)?;
@@ -136,6 +156,55 @@ pub fn search_global(
         next_peer_id,
         next_offset_id,
     })
+}
+
+fn global_search_request(
+    peers: &HashMap<i64, CachedPeer>,
+    query: &str,
+    filter: &str,
+    offset_rate: i32,
+    offset_peer_id: i64,
+    offset_id: i32,
+    limit: i32,
+    folder_id: i32,
+) -> Result<MessagesSearchGlobalRequest, MtprotoError> {
+    let filter = global_search_filter(filter)?;
+    let offset_peer = offset_input_peer(peers, offset_peer_id)?;
+    let (flags, folder_id) = search_global_folder(folder_id);
+    Ok(MessagesSearchGlobalRequest {
+        flags,
+        broadcasts_only: None,
+        groups_only: None,
+        users_only: None,
+        folder_id,
+        community: None,
+        q: query.to_string(),
+        filter: Box::new(filter),
+        min_date: 0,
+        max_date: 0,
+        offset_rate,
+        offset_peer: Box::new(offset_peer),
+        offset_id,
+        limit: clamp_search_limit(limit),
+    })
+}
+
+fn global_search_filter(kind: &str) -> Result<MessagesFilter, MtprotoError> {
+    if kind.is_empty() {
+        return Ok(MessagesFilter::InputMessagesFilterEmpty(
+            InputMessagesFilterEmptyConstructor {},
+        ));
+    }
+    let filter = messages_filter(kind);
+    if matches!(
+        filter,
+        MessagesFilter::InputMessagesFilterEmpty(_) | MessagesFilter::InputMessagesFilterPinned(_)
+    ) {
+        return Err(MtprotoError::Message(format!(
+            "unsupported global search filter: {kind}"
+        )));
+    }
+    Ok(filter)
 }
 
 fn offset_input_peer(
@@ -164,18 +233,18 @@ fn search_peer_from_peer<'a>(
     let mut is_group = matches!(peer, Peer::PeerChat(_));
     let mut is_channel = matches!(peer, Peer::PeerChannel(_));
     for user in users {
-        if let User::User(u) = user {
-            if peers::chat_id_for_user(u.id) == peer_id {
-                title = display_name(
-                    u.first_name.as_deref(),
-                    u.last_name.as_deref(),
-                    u.username.as_deref(),
-                );
-                username = u.username.clone();
-                is_bot = u.bot.is_some();
-                is_group = false;
-                is_channel = false;
-            }
+        if let User::User(u) = user
+            && peers::chat_id_for_user(u.id) == peer_id
+        {
+            title = display_name(
+                u.first_name.as_deref(),
+                u.last_name.as_deref(),
+                u.username.as_deref(),
+            );
+            username = u.username.clone();
+            is_bot = u.bot.is_some();
+            is_group = false;
+            is_channel = false;
         }
     }
     if title.is_empty() {

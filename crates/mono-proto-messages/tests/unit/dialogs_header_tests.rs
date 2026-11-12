@@ -286,6 +286,72 @@ fn text_message(sender_id: i64, id: i32) -> mono_proto::latest::api::Message {
     })
 }
 
+fn mixed_representation_message() -> mono_proto::latest::api::Message {
+    use mono_proto::latest::api::{
+        Message, PageBlock, PageBlockParagraphConstructor, RichMessage, RichMessageConstructor,
+    };
+    let mut message = text_message(1, 1);
+    let Message::Message(ref mut body) = message else {
+        unreachable!()
+    };
+    body.rich_message = Some(Box::new(RichMessage::RichMessage(RichMessageConstructor {
+        flags: 0,
+        rtl: None,
+        part: None,
+        blocks: Box::new(Vector::Vector(VectorConstructor {
+            field_0: 1,
+            field_1: vec![Box::new(PageBlock::PageBlockParagraph(
+                PageBlockParagraphConstructor {
+                    text: Box::new(RichText::TextBold(TextBoldConstructor {
+                        text: Box::new(RichText::TextPlain(TextPlainConstructor {
+                            text: "long emoji \u{1f600}".into(),
+                        })),
+                    })),
+                },
+            ))],
+        })),
+        photos: Box::new(Vector::Vector(VectorConstructor {
+            field_0: 0,
+            field_1: vec![],
+        })),
+        documents: Box::new(Vector::Vector(VectorConstructor {
+            field_0: 0,
+            field_1: vec![],
+        })),
+    })));
+    message
+}
+
+#[test]
+fn message_entities_follow_the_selected_text_representation() {
+    use mono_proto::latest::api::Message;
+    let mut message = mixed_representation_message();
+    let plain = message_to_dto(&message, &mut Default::default()).unwrap();
+    assert_eq!(plain.text.as_deref(), Some("hi"));
+    assert!(plain.entities_json.is_none());
+    let Message::Message(ref mut body) = message else {
+        unreachable!()
+    };
+    body.message.clear();
+    let rich = message_to_dto(&message, &mut Default::default()).unwrap();
+    assert_eq!(rich.text.as_deref(), Some("long emoji \u{1f600}"));
+    assert!(rich.entities_json.unwrap().contains("\"length\":13"));
+}
+
+#[test]
+#[ignore = "manual mapping microbenchmark"]
+fn benchmark_plain_message_with_rich_content() {
+    use std::{hint::black_box, time::Instant};
+    let message = mixed_representation_message();
+    let mut media = Default::default();
+    let iterations = 100_000;
+    let started = Instant::now();
+    for _ in 0..iterations {
+        black_box(message_to_dto(black_box(&message), &mut media));
+    }
+    eprintln!("{iterations} mappings: {:?}", started.elapsed());
+}
+
 fn service_message(sender_id: i64, id: i32) -> mono_proto::latest::api::Message {
     use mono_proto::latest::api::{
         Message, MessageAction, MessageActionHistoryClearConstructor, MessageServiceConstructor,

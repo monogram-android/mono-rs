@@ -355,12 +355,11 @@ pub fn media_document(
         if let Some(duration) = duration {
             map.insert("duration".into(), json!(duration));
         }
-        if let (Some(w), Some(h)) = (width, height) {
-            if w > 0 && h > 0 {
+        if let (Some(w), Some(h)) = (width, height)
+            && w > 0 && h > 0 {
                 map.insert("w".into(), json!(w));
                 map.insert("h".into(), json!(h));
             }
-        }
         if let Some(caption) = caption {
             map.insert("caption".into(), caption_json(caption));
         }

@@ -292,7 +292,7 @@ fn content_request(
             "unsupported checklist formatting".into(),
         ));
     }
-    *target = Box::new(TextWithEntities::TextWithEntities(
+    **target = TextWithEntities::TextWithEntities(
         TextWithEntitiesConstructor {
             text: edit.text.clone(),
             entities: entities.unwrap_or_else(|| {
@@ -302,7 +302,7 @@ fn content_request(
                 }))
             }),
         },
-    ));
+    );
     Ok(media_request(
         peer,
         message_id,

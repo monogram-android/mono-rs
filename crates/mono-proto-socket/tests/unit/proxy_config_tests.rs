@@ -208,10 +208,14 @@ fn https_proxy_rejects_untrusted_certificate() {
                 .unwrap();
         let cert =
             CertificateDer::from(include_bytes!("../fixtures/untrusted-proxy-cert.der").to_vec());
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(vec![cert], key)
-            .unwrap();
+        let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .unwrap();
         let connection = rustls::ServerConnection::new(std::sync::Arc::new(config)).unwrap();
         let mut stream = rustls::StreamOwned::new(connection, socket);
         let _ = stream.read(&mut [0; 1]);
@@ -252,10 +256,14 @@ fn https_connect_verifies_trusted_certificate_and_hostname() {
                 include_bytes!("../fixtures/untrusted-proxy-key.der").to_vec(),
             )
             .unwrap();
-            let config = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(vec![cert], key)
-                .unwrap();
+            let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert], key)
+            .unwrap();
             let connection = rustls::ServerConnection::new(std::sync::Arc::new(config)).unwrap();
             let mut stream = rustls::StreamOwned::new(connection, socket);
             let mut request = Vec::new();
@@ -281,9 +289,13 @@ fn https_connect_verifies_trusted_certificate_and_hostname() {
                 include_bytes!("../fixtures/proxy-ca.der").to_vec(),
             ))
             .unwrap();
-        let config = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+        let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
         let mut proxy = http_proxy();
         proxy.kind = ProxyKind::Https;
         proxy.host = host.into();

@@ -87,11 +87,10 @@ pub fn page_from_forum_topics(
     );
     let mut previews = HashMap::new();
     for msg in vector_boxed_items(&page.messages) {
-        if let Message::Message(m) = msg {
-            if !m.message.is_empty() {
+        if let Message::Message(m) = msg
+            && !m.message.is_empty() {
                 previews.insert(m.id, m.message.clone());
             }
-        }
     }
     let topics = vector_boxed_items(&page.topics)
         .map(|topic| {

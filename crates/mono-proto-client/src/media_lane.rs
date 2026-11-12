@@ -372,13 +372,12 @@ pub fn download_media_range_on_lane_dc(
             });
             client.data.lock().dc_temp_auth.remove(&target_dc);
             for lane in client.media.iter() {
-                if let Some(mut lane_io) = lane.io.try_lock() {
-                    if lane_io.snapshot.dc_id == target_dc {
+                if let Some(mut lane_io) = lane.io.try_lock()
+                    && lane_io.snapshot.dc_id == target_dc {
                         lane_io.temp_expires_at = 0;
                         lane_io.perm_key = None;
                         lane_io.transport = None;
                     }
-                }
             }
             staged.keep();
             return download_media_range_on_lane_dc(

@@ -416,7 +416,7 @@ impl TcpConnection {
                     if let Some(domain) = proxy.fake_tls_domain.clone() {
                         let key = proxy
                             .secret
-                            .ok_or_else(|| ProxyError::InvalidConfig("invalid proxy secret"))?;
+                            .ok_or(ProxyError::InvalidConfig("invalid proxy secret"))?;
                         crate::proxy::faketls::handshake(&mut stream, &domain, &key)?;
                         ProxyStream::FakeTls(crate::proxy::faketls::FakeTlsStream::new(stream))
                     } else {

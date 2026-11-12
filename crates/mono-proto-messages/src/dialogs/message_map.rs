@@ -1,9 +1,11 @@
 use crate::{HashMap, HashMapExt};
 
 use mono_proto::latest::api::{
-    Chat as TlChat, Message, MessageEntity, MessageFwdHeader, MessageMedia, MessageReplyHeader,
-    MessageReplyHeaderConstructor, MessagesMessages, RichMessage, RichText, User, Vector,
+    Chat as TlChat, Message, MessageFwdHeader, MessageMedia, MessageReplyHeader,
+    MessageReplyHeaderConstructor, MessagesMessages, RichMessage, User,
 };
+#[cfg(test)]
+use mono_proto::latest::api::{MessageEntity, RichText, Vector};
 
 use super::peers::{cache_from_users_chats, display_name};
 use crate::emoji_status::emoji_status_document_id;
@@ -43,6 +45,7 @@ pub fn message_to_dto_named(
             let rich = m
                 .rich_message
                 .as_ref()
+                .filter(|_| m.message.is_empty())
                 .and_then(|rich| match rich.as_ref() {
                     RichMessage::RichMessage(body) => {
                         let photos: Vec<_> = vector_boxed_items(&body.photos).cloned().collect();
@@ -108,14 +111,12 @@ pub fn message_to_dto_named(
                 media_height: indexed.height,
                 reply_quote,
                 reply_quote_entities_json,
-                entities_json: rich
-                    .as_ref()
-                    .and_then(|formatted| {
-                        (!formatted.entities.is_empty())
-                            .then(|| serde_json::to_string(&formatted.entities.as_slice()).ok())
-                            .flatten()
-                    })
-                    .or_else(|| entities_to_json(m.entities.as_deref())),
+                entities_json: match rich.as_ref() {
+                    Some(formatted) => (!formatted.entities.is_empty())
+                        .then(|| serde_json::to_string(&formatted.entities.as_slice()).ok())
+                        .flatten(),
+                    None => entities_to_json(m.entities.as_deref()),
+                },
                 noforwards: m.noforwards.is_some(),
                 reply_to_msg_id,
                 reply_to_top_id,
@@ -394,10 +395,10 @@ pub fn fill_missing_reply_quotes(dtos: &mut [MessageDto]) {
         {
             continue;
         }
-        if let Some(id) = dto.reply_to_msg_id {
-            if let Some(text) = texts.get(&id) {
-                dto.reply_quote = Some(text.clone());
-            }
+        if let Some(id) = dto.reply_to_msg_id
+            && let Some(text) = texts.get(&id)
+        {
+            dto.reply_quote = Some(text.clone());
         }
     }
 }

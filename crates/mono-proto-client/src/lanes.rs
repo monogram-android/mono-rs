@@ -188,17 +188,39 @@ pub fn close_idle_file_transports(client: &Client, now: std::time::Instant) -> b
     pending
 }
 
-/// Prefer a free temporary-key upload socket. Lane 0 is the permanent-key fallback.
-pub fn lock_upload_lane(client: &Client) -> parking_lot::MutexGuard<'_, SessionIo> {
-    let now = crate::bind_temp::unix_now();
-    for lane in client.upload.iter().skip(1) {
-        if let Some(io) = lane.io.try_lock() {
-            if io.temp_expires_at > now {
-                return io;
+pub fn lock_upload_lane(
+    client: &Client,
+    pfs: bool,
+) -> Result<parking_lot::MutexGuard<'_, SessionIo>, MtprotoError> {
+    loop {
+        mono_proto_runtime::request_control::check()
+            .map_err(|e| MtprotoError::Message(e.to_string()))?;
+        client.connections.wait(std::time::Duration::ZERO)
+            .map_err(|e| MtprotoError::Message(e.to_string()))?;
+        for lane in &client.upload {
+            if let Some(io) = lane.io.try_lock() {
+                if io.perm_key.is_some()
+                    && crate::bind_temp::temp_key_valid(&io.snapshot, io.temp_expires_at)
+                {
+                    mono_proto_runtime::request_control::check()
+                        .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                    client.connections.wait(std::time::Duration::ZERO)
+                        .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                    return Ok(io);
+                }
             }
         }
+        for (index, lane) in client.upload.iter().enumerate() {
+            if (pfs || index == 0) && let Some(io) = lane.io.try_lock() {
+                mono_proto_runtime::request_control::check()
+                    .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                client.connections.wait(std::time::Duration::ZERO)
+                    .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                return Ok(io);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    client.upload[0].io.lock()
 }
 
 pub fn schedule_file_cleanup(client: &Arc<Client>) {

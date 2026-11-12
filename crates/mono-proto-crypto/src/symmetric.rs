@@ -45,7 +45,7 @@ fn validate_ige(payload: &[u8], iv: &[u8]) -> Result<(), Error> {
             expected: 32,
         });
     }
-    if payload.len() % 16 != 0 {
+    if !payload.len().is_multiple_of(16) {
         return Err(Error::UnalignedPayload(payload.len()));
     }
     Ok(())
@@ -58,7 +58,7 @@ pub fn aes_ige_encrypt(payload: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>,
     let mut previous_ciphertext = <[u8; 16]>::try_from(&iv[..16]).expect("validated IV");
     let mut previous_plaintext = <[u8; 16]>::try_from(&iv[16..]).expect("validated IV");
     let mut output = Vec::with_capacity(payload.len());
-    for plaintext in payload.chunks_exact(16) {
+    for plaintext in payload.as_chunks::<16>().0 {
         let mut block = [0_u8; 16];
         for i in 0..16 {
             block[i] = plaintext[i] ^ previous_ciphertext[i];
@@ -83,7 +83,7 @@ pub fn aes_ige_decrypt(payload: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>,
     let mut previous_ciphertext = <[u8; 16]>::try_from(&iv[..16]).expect("validated IV");
     let mut previous_plaintext = <[u8; 16]>::try_from(&iv[16..]).expect("validated IV");
     let mut output = Vec::with_capacity(payload.len());
-    for ciphertext in payload.chunks_exact(16) {
+    for ciphertext in payload.as_chunks::<16>().0 {
         let mut block = [0_u8; 16];
         for i in 0..16 {
             block[i] = ciphertext[i] ^ previous_plaintext[i];

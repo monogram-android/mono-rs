@@ -21,9 +21,8 @@ use crate::registry::get_client;
 use crate::session::*;
 use crate::state::{ClientData, ClientState};
 use mono_proto_session::Snapshot;
-use mono_proto_types::collections::{HashMap, HashMapExt};
+use mono_proto_types::collections::HashMapExt;
 use mono_proto_types::{message::MessageDto, peers};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 #[path = "peer_avatar.rs"]
@@ -329,11 +328,9 @@ pub fn refresh_last_inline(state: &mut ClientState) {
         &query.offset,
     )
     .is_ok()
-    {
-        if let Some(stored) = state.last_inline.as_mut() {
+        && let Some(stored) = state.last_inline.as_mut() {
             stored.last_refresh = Some(std::time::Instant::now());
         }
-    }
 }
 
 pub fn download_message_media(

@@ -26,7 +26,6 @@ mono-proto-codec = { path = "../mono-proto-codec", version = "0.1.0" }
 bnum = "0.14"
 bon = { version = "=3.8.1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
-thiserror = "2"
 
 [dev-dependencies]
 proptest.workspace = true

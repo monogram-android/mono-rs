@@ -34,4 +34,3 @@ mono-proto-types = { path = "../mono-proto-types" }
 
 [dev-dependencies]
 aes = "0.9"
-ctr = "0.10"

@@ -10,20 +10,18 @@ use mono_proto::latest::api::{
     Chat as TlChat, Document, DocumentAttribute, HelpAppConfig, HelpGetAppConfigRequest,
     InputDocument, InputDocumentConstructor, InputGeoPoint, InputGeoPointConstructor, InputMedia,
     InputMediaDocumentConstructor, InputMediaGeoLiveConstructor, InputMediaGeoPointConstructor,
-    JsonObjectValue, JsonValue, Message, MessagePeerReaction, MessagePeerVote, MessageReactions,
-    MessageReplies, MessagesAppendTodoListRequest, MessagesBotCallbackAnswer,
+    JsonObjectValue, JsonValue, Message, MessagePeerReaction, MessagePeerVote, MessageReactions, MessagesAppendTodoListRequest, MessagesBotCallbackAnswer,
     MessagesDiscussionMessage, MessagesGetBotCallbackAnswerRequest,
     MessagesGetCustomEmojiDocumentsRequest, MessagesGetDiscussionMessageRequest,
     MessagesGetMessageReactionsListRequest, MessagesGetPollVotesRequest,
     MessagesGetRecentReactionsRequest, MessagesGetSavedGifsRequest, MessagesGetTopReactionsRequest,
     MessagesMessageReactionsList, MessagesReactions, MessagesSavedGifs, MessagesSendMediaRequest,
     MessagesSendReactionRequest, MessagesSendVoteRequest, MessagesToggleTodoCompletedRequest,
-    MessagesVotesList, Reaction, ReactionCount, ReactionCustomEmojiConstructor,
+    MessagesVotesList, Reaction, ReactionCustomEmojiConstructor,
     ReactionEmojiConstructor, TextWithEntities, TextWithEntitiesConstructor, TodoItem,
     TodoItemConstructor, True, TrueConstructor, Updates, User, Vector, VectorConstructor,
 };
 use mono_proto_session::Snapshot;
-use serde_json::json;
 
 use crate::api_invoke;
 use crate::media::{self, MediaIndex, MediaLocation};
@@ -848,7 +846,7 @@ pub fn get_message_reactions_page(
         ));
     };
     let titles: HashMap<i64, crate::CompactString> = vector_boxed_items(&body.users)
-        .map(|user| user_title(user))
+        .map(user_title)
         .collect();
     let mut peers_out = Vec::new();
     for row in vector_boxed_items(&body.reactions) {
@@ -918,7 +916,7 @@ pub fn get_poll_votes_page(
         return Err(MtprotoError::Message("unexpected votesList".into()));
     };
     let titles: HashMap<i64, crate::CompactString> = vector_boxed_items(&body.users)
-        .map(|user| user_title(user))
+        .map(user_title)
         .collect();
     let mut voters = Vec::new();
     for row in vector_boxed_items(&body.votes) {

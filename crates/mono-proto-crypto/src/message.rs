@@ -1,6 +1,7 @@
 //! MTProto authorization and encrypted-message key operations.
 
 use crate::{Error, aes_ige_decrypt, aes_ige_encrypt, constant_time_eq, sha1, sha256};
+use sha2::{Digest, Sha256};
 
 /// Direction used by the MTProto 2.0 message-key KDF.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,11 +31,8 @@ pub fn message_key(
             expected: 128,
         });
     }
-    let x = direction.x();
-    let mut input = Vec::with_capacity(32 + plaintext_with_padding.len());
-    input.extend_from_slice(&auth_key[88 + x..120 + x]);
-    input.extend_from_slice(plaintext_with_padding);
-    Ok(sha256(&input)[8..24].try_into().expect("fixed slice"))
+    let hash = message_key_hash(auth_key, plaintext_with_padding, direction);
+    Ok(hash[8..24].try_into().expect("fixed slice"))
 }
 
 /// Compute the transport quick-ack token for authenticated plaintext.
@@ -50,12 +48,20 @@ pub fn quick_ack_token(
             expected: 128,
         });
     }
-    let x = direction.x();
-    let mut input = Vec::with_capacity(32 + plaintext_with_padding.len());
-    input.extend_from_slice(&auth_key[88 + x..120 + x]);
-    input.extend_from_slice(plaintext_with_padding);
-    let hash = sha256(&input);
+    let hash = message_key_hash(auth_key, plaintext_with_padding, direction);
     Ok(u32::from_le_bytes(hash[..4].try_into().expect("fixed hash prefix")) | 0x8000_0000)
+}
+
+fn message_key_hash(
+    auth_key: &[u8],
+    plaintext_with_padding: &[u8],
+    direction: Direction,
+) -> [u8; 32] {
+    let x = direction.x();
+    let mut hash = Sha256::new();
+    hash.update(&auth_key[88 + x..120 + x]);
+    hash.update(plaintext_with_padding);
+    hash.finalize().into()
 }
 
 /// Derive the AES key and IV for an MTProto 2.0 encrypted message.
@@ -218,7 +224,7 @@ fn validate_message_parts(auth_key: &[u8], body: &[u8], padding: &[u8]) -> Resul
             expected: 256,
         });
     }
-    if body.is_empty() || body.len() > 16 * 1024 * 1024 || body.len() % 4 != 0 {
+    if body.is_empty() || body.len() > 16 * 1024 * 1024 || !body.len().is_multiple_of(4) {
         return Err(Error::InvalidEnvelope(
             "message body must be nonempty, 4-byte aligned, and at most 16 MiB",
         ));
@@ -226,7 +232,7 @@ fn validate_message_parts(auth_key: &[u8], body: &[u8], padding: &[u8]) -> Resul
     if !(12..=1024).contains(&padding.len()) {
         return Err(Error::InvalidEnvelope("padding is outside 12..=1024 bytes"));
     }
-    if (32 + body.len() + padding.len()) % 16 != 0 {
+    if !(32 + body.len() + padding.len()).is_multiple_of(16) {
         return Err(Error::InvalidEnvelope("plaintext is not AES-block aligned"));
     }
     Ok(())
@@ -249,7 +255,7 @@ pub fn decrypt_message(
             expected: 256,
         });
     }
-    if packet.len() < 24 + 48 || (packet.len() - 24) % 16 != 0 {
+    if packet.len() < 24 + 48 || !(packet.len() - 24).is_multiple_of(16) {
         return Err(Error::InvalidEnvelope("invalid ciphertext length"));
     }
     let encoded_key_id = i64::from_le_bytes(packet[..8].try_into().expect("fixed header"));
@@ -270,7 +276,7 @@ pub fn decrypt_message(
     let sequence = i32::from_le_bytes(plaintext[24..28].try_into().expect("validated minimum"));
     let body_length =
         u32::from_le_bytes(plaintext[28..32].try_into().expect("validated minimum")) as usize;
-    if body_length == 0 || body_length > max_body_length || body_length % 4 != 0 {
+    if body_length == 0 || body_length > max_body_length || !body_length.is_multiple_of(4) {
         return Err(Error::InvalidEnvelope(
             "invalid authenticated message length",
         ));

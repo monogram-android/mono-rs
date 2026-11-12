@@ -37,6 +37,29 @@ fn invalidation(kind: &str) -> UpdateEventDto {
 }
 
 #[test]
+fn filtered_global_search_dispatch_rejects_invalid_filters() {
+    let path = temp_session("global-search-filter");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let err = crate::dispatch::search_global_filtered(
+        handle,
+        "query".into(),
+        "pinned".into(),
+        0,
+        0,
+        0,
+        20,
+        0,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("unsupported global search filter: pinned")
+    );
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn global_invalidation_resets_seen_at_its_position() {
     let mut seen = super::HashSet::default();
     seen.insert((7, 1));
@@ -126,6 +149,93 @@ fn queue(handle: u64, id: i32) -> DurableBatch {
     d.updates = cursor(id);
     d.persist_epoch += 1;
     batch
+}
+
+#[test]
+fn pending_rechecks_batches_added_after_a_save() {
+    let path = temp_session("pending-race");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let first = queue(handle, 1);
+    let client = get_client(handle).unwrap();
+    let mut calls = 0;
+    let batches = super::pending_update_batches_with(&client, || {
+        calls += 1;
+        if calls == 1 {
+            queue(handle, 2);
+        }
+    })
+    .unwrap();
+    assert_eq!(calls, 1);
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].batch_id, first.batch_id);
+    assert!(client.data.lock().journal.has_undelivered());
+    let both = pending_update_batches(handle).unwrap();
+    assert_eq!(both.len(), 2);
+    crate::registry::CLIENTS.lock().remove(&handle);
+    let restarted = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let restored = pending_update_batches(restarted).unwrap();
+    assert_eq!(
+        restored.iter().map(|b| b.batch_id).collect::<Vec<_>>(),
+        both.iter().map(|b| b.batch_id).collect::<Vec<_>>()
+    );
+    destroy_client(restarted);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn pending_succeeds_when_unrelated_state_changes_after_save() {
+    let path = temp_session("pending-busy");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let batch = queue(handle, 1);
+    let client = get_client(handle).unwrap();
+    let result = super::pending_update_batches_with(&client, || {
+        client.data.lock().persist_epoch += 1;
+    })
+    .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].batch_id, batch.batch_id);
+    assert!(!client.data.lock().journal.has_undelivered());
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn pending_does_not_resurrect_acknowledged_batches_or_deliver_new_ones() {
+    let path = temp_session("pending-ack");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let first = queue(handle, 1);
+    let client = get_client(handle).unwrap();
+    let batches = super::pending_update_batches_with(&client, || {
+        let mut data = client.data.lock();
+        let generation = data.journal.account_generation;
+        assert!(Arc::make_mut(&mut data.journal).acknowledge(generation, first.batch_id));
+        Arc::make_mut(&mut data.journal).push(vec![message_event(2)], cursor(2), vec![]);
+        data.persist_epoch += 1;
+    })
+    .unwrap();
+    assert!(batches.is_empty());
+    assert!(client.data.lock().journal.has_undelivered());
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn pending_drops_snapshot_after_account_reset() {
+    let path = temp_session("pending-reset");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    queue(handle, 1);
+    let client = get_client(handle).unwrap();
+    let batches = super::pending_update_batches_with(&client, || {
+        let mut data = client.data.lock();
+        Arc::make_mut(&mut data.journal).reset_account();
+        Arc::make_mut(&mut data.journal).push(vec![message_event(2)], cursor(2), vec![]);
+        data.persist_epoch += 1;
+    })
+    .unwrap();
+    assert!(batches.is_empty());
+    assert!(client.data.lock().journal.has_undelivered());
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]

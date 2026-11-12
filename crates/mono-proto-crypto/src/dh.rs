@@ -67,13 +67,16 @@ pub fn factor_pq(pq: u64) -> Result<(u64, u64), Error> {
         ));
     }
     for divisor in [2_u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
-        if pq % divisor == 0 {
+        if pq.is_multiple_of(divisor) {
             let other = pq / divisor;
             if other == divisor || !is_probable_prime(&BigUint::from(other)) {
                 return Err(Error::InvalidPq("factors are not distinct primes"));
             }
             return Ok((divisor.min(other), divisor.max(other)));
         }
+    }
+    if is_probable_prime(&BigUint::from(pq)) {
+        return Err(Error::InvalidPq("value is prime"));
     }
     for constant in 1_u64..=64 {
         let mut slow = 2_u64;

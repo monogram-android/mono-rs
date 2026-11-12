@@ -47,12 +47,20 @@ fn upload_owner_changes_stop_before_the_next_chunk_or_file_access() {
     });
     assert!(result.is_err());
     assert_eq!(chunks, 1);
-    let stale = save_items_with_owner(&client, 1, &[item], Some(owner), |_, _| {
+    let stale = save_items_with_owner(&client, 1, &[item.clone()], Some(owner), |_, _| {
         panic!("stale owner must not upload")
     });
     assert!(
         matches!(stale, Err(MtprotoError::Message(ref value)) if value == "request cancelled: session changed")
     );
+    let mut legacy_chunks = 0;
+    let result = save_items_with(&client, 1, &[item], |_, _| {
+        legacy_chunks += 1;
+        client.data.lock().session_dead = true;
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert_eq!(legacy_chunks, 1);
     destroy_client(handle);
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_file(file);

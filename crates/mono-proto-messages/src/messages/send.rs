@@ -7,12 +7,9 @@ use crate::{HashMap, HashMapExt};
 
 use mono_proto::latest::api::{
     ChannelsDeleteMessagesRequest, InputChannel, InputChannelConstructor, InputMedia,
-    InputMediaWebPageConstructor, InputPeer, InputReplyTo, InputReplyToMessageConstructor,
-    MessageEntity, MessagesAffectedMessages, MessagesDeleteMessagesRequest,
-    MessagesEditMessageRequest, MessagesForwardMessagesRequest, MessagesSendMediaRequest,
-    MessagesSendMessageRequest, True, TrueConstructor, Updates, Vector, VectorConstructor,
+    InputMediaWebPageConstructor, MessagesAffectedMessages, MessagesDeleteMessagesRequest,
+    MessagesEditMessageRequest, MessagesForwardMessagesRequest, MessagesSendMediaRequest, True, TrueConstructor, Updates, Vector, VectorConstructor,
 };
-use mono_proto_crypto::fill_random;
 use mono_proto_session::Snapshot;
 
 use crate::api_invoke;
@@ -144,12 +141,11 @@ pub fn send_text_with_options(
         peers,
         media_index,
     );
-    if let Ok(ref result) = mapped {
-        if let Some(ack) = crate::messages_send_result::implicit_ack(&updates, result, outgoing_id)
+    if let Ok(ref result) = mapped
+        && let Some(ack) = crate::messages_send_result::implicit_ack(&updates, result, outgoing_id)
         {
             crate::rpc::enqueue_response(snapshot.dc_id, &ack)?;
         }
-    }
     crate::rpc::enqueue_response(snapshot.dc_id, &updates)?;
     let mut result = mapped?;
     let dto = match &mut result {

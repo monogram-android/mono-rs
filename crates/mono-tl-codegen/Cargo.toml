@@ -23,7 +23,6 @@ tracing = ["dep:tracing", "mono-tl-schema/tracing"]
 dangerous-unredacted-logging = ["tracing", "mono-tl-schema/dangerous-unredacted-logging"]
 
 [dev-dependencies]
-pretty_assertions = "1"
 tempfile = "3"
 
 [[bin]]

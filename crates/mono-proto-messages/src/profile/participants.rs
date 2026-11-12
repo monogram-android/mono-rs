@@ -54,8 +54,8 @@ pub fn get_group_admin_tags(
             MessagesGetFullChatRequest { chat_id: chat.id },
         )?;
         let MessagesChatFull::MessagesChatFull(full) = response;
-        if let ChatFull::ChatFull(chat_full) = full.full_chat.as_ref() {
-            if let ChatParticipants::ChatParticipants(participants) =
+        if let ChatFull::ChatFull(chat_full) = full.full_chat.as_ref()
+            && let ChatParticipants::ChatParticipants(participants) =
                 chat_full.participants.as_ref()
             {
                 for participant in vector_boxed_items(&participants.participants) {
@@ -64,7 +64,6 @@ pub fn get_group_admin_tags(
                     }
                 }
             }
-        }
     }
     Ok(serde_json::Value::Object(tags).to_string())
 }
@@ -236,8 +235,8 @@ pub fn get_participants(
         )?;
         let MessagesChatFull::MessagesChatFull(full) = response;
         let users: Vec<User> = vector_boxed_items(&full.users).cloned().collect();
-        if let ChatFull::ChatFull(chat_full) = full.full_chat.as_ref() {
-            if let ChatParticipants::ChatParticipants(participants) =
+        if let ChatFull::ChatFull(chat_full) = full.full_chat.as_ref()
+            && let ChatParticipants::ChatParticipants(participants) =
                 chat_full.participants.as_ref()
             {
                 let all: Vec<&ChatParticipant> =
@@ -260,7 +259,6 @@ pub fn get_participants(
                     }
                 }
             }
-        }
     } else {
         return Err(MtprotoError::Message("peer has no participants".into()));
     }

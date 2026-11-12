@@ -50,8 +50,8 @@ pub fn get_web_page(
         vector_boxed_items(&body.chats).cloned(),
     );
     let dto = map_messages_web_page(body.webpage.as_ref(), media, hash);
-    if let WebPage::WebPage(page) = body.webpage.as_ref() {
-        if let Some(Page::Page(cached)) = page.cached_page.as_ref().map(|p| p.as_ref()) {
+    if let WebPage::WebPage(page) = body.webpage.as_ref()
+        && let Some(Page::Page(cached)) = page.cached_page.as_ref().map(|p| p.as_ref()) {
             index_map_previews(
                 snapshot,
                 api_id,
@@ -60,7 +60,6 @@ pub fn get_web_page(
                 vector_boxed_items(&cached.blocks),
             );
         }
-    }
     Ok(dto)
 }
 

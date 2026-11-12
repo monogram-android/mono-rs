@@ -5,11 +5,9 @@ use crate::{
 use mono_proto_messages::dialogs;
 use mono_proto_messages::upload_rpc::UploadStaging;
 use mono_proto_runtime::scheduler;
-use mono_proto_types::peers;
 
 use crate::access::*;
 use crate::client::Client;
-use crate::config::schedule_transfer_config;
 use crate::lanes::*;
 use crate::media_download::*;
 use crate::persist::*;
@@ -486,6 +484,36 @@ pub fn search_global(
     })
 }
 
+/// Search globally with a media filter; restart pagination when the filter changes.
+pub fn search_global_filtered(
+    handle: u64,
+    query: String,
+    filter: String,
+    offset_rate: i32,
+    offset_peer_id: i64,
+    offset_id: i32,
+    limit: i32,
+    folder_id: i32,
+) -> Result<crate::GlobalMessageSearchDto, MtprotoError> {
+    with_client_mut(handle, |state| {
+        call_with_migrate(state, |state| {
+            crate::message_ops::search_rpc::search_global_filtered(
+                &mut state.snapshot,
+                state.api_id,
+                &mut state.peers,
+                &mut state.media,
+                &query,
+                &filter,
+                offset_rate,
+                offset_peer_id,
+                offset_id,
+                limit,
+                folder_id,
+            )
+        })
+    })
+}
+
 pub fn get_pinned_messages(
     handle: u64,
     chat_id: i64,
@@ -901,7 +929,7 @@ fn save_items_with_owner(
 ) -> Result<Vec<UploadStaging>, MtprotoError> {
     let _ = api_id;
     let _policy = mono_proto_runtime::transfer_policy::bind(Arc::clone(&client.policy));
-    let (home, pfs, owner) = {
+    let (home, pfs, owner, upload_owner) = {
         let _gate = client.main_gate.acquire(scheduler::current_class())?;
         let mut main = lock_request_lane(&client.main, "lane_wait.upload_home")?;
         if let Some(owner) = expected_owner {
@@ -911,21 +939,32 @@ fn save_items_with_owner(
         if let Some(owner) = expected_owner {
             check_upload_owner(client, owner)?;
         }
+        let data = client.data.lock();
+        let upload_owner = UploadOwner {
+            generation: data.journal.account_generation,
+            session_id: data.home_session_id,
+        };
+        if !session_lease_valid(&data, upload_owner.session_id) {
+            return Err(expired_session_lease());
+        }
         (
             main.snapshot.clone(),
             main.temp_expires_at != 0 || main.perm_key.is_some(),
-            client.data.lock().home_session_id,
+            data.home_session_id,
+            upload_owner,
         )
     };
     crate::media_support::check_transfer_flood(
         home.dc_id,
         crate::media_support::TransferClass::Upload,
     )?;
-    let mut io = crate::lanes::lock_upload_lane(client);
-    if let Some(owner) = expected_owner {
-        check_upload_owner(client, owner)?;
-    }
+    let mut io = crate::lanes::lock_upload_lane(client, pfs)?;
+    check_upload_owner(client, upload_owner)?;
     crate::bind_temp::ensure_main_temp(client, &mut io, pfs)?;
+    check_upload_owner(client, upload_owner)?;
+    if pfs && (io.temp_expires_at == 0 || io.perm_key.is_none()) {
+        return Err(expired_session_lease());
+    }
     if io.temp_expires_at == 0
         && io.perm_key.is_none()
         && sync_upload_snapshot(&mut io.snapshot, &home)
@@ -952,9 +991,7 @@ fn save_items_with_owner(
                     mono_proto_messages::upload_rpc::open_staging_with_rtt(item, rtt)?;
                 let width = staging.in_flight();
                 upload_batches(&mut staging, width, |batch| {
-                    if let Some(owner) = expected_owner {
-                        check_upload_owner(client, owner)?;
-                    }
+                    check_upload_owner(client, upload_owner)?;
                     crate::media_support::check_transfer_flood(
                         io.snapshot.dc_id,
                         crate::media_support::TransferClass::Upload,

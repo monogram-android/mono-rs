@@ -1,7 +1,7 @@
 use crate::dialogs::message_to_dto;
 use crate::media::MediaIndex;
 use crate::peers::vector_boxed_items;
-use crate::{HashMap, HashMapExt, MessageDto};
+use crate::{HashMapExt, MessageDto};
 use mono_proto::latest::api::*;
 use mono_proto_crypto::fill_random;
 

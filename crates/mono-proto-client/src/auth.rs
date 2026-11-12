@@ -15,7 +15,6 @@ use crate::persist::persist;
 use crate::registry::get_client;
 use crate::session::*;
 use crate::state::ClientState;
-use crate::updates::begin_updates;
 const DEFAULT_DC_ID: i32 = 2;
 
 pub fn login_key_error(state: &ClientState, error: MtprotoError) -> MtprotoError {
@@ -443,15 +442,14 @@ pub fn logout(handle: u64) -> Result<(), MtprotoError> {
         };
 
         let dc = state.snapshot.dc_id;
-        if let Ok(Some(token)) = &remote {
-            if !token.is_empty() && token.len() <= 256 {
+        if let Ok(Some(token)) = &remote
+            && !token.is_empty() && token.len() <= 256 {
                 state.logout_tokens.push(token.clone());
                 if state.logout_tokens.len() > 20 {
                     let keep_from = state.logout_tokens.len() - 20;
                     state.logout_tokens.drain(..keep_from);
                 }
             }
-        }
         state.user_id = None;
         state.peers.clear();
         state.updates = None;

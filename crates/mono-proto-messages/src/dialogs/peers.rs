@@ -49,10 +49,10 @@ pub fn cache_from_users_chats(
                 u.access_hash.unwrap_or(0),
                 u.min.is_some(),
             );
-            if let Some(photo) = u.photo.as_ref() {
-                if let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref() {
-                    if let Some(hash) = u.access_hash.filter(|&h| h != 0) {
-                        if u.min.is_none() || !media_index.contains_key(&(chat_id, 0)) {
+            if let Some(photo) = u.photo.as_ref()
+                && let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref()
+                    && let Some(hash) = u.access_hash.filter(|&h| h != 0)
+                        && (u.min.is_none() || !media_index.contains_key(&(chat_id, 0))) {
                             index_dialog_avatar(
                                 media_index,
                                 chat_id,
@@ -65,9 +65,6 @@ pub fn cache_from_users_chats(
                                 p.stripped_thumb.as_deref(),
                             );
                         }
-                    }
-                }
-            }
         }
     }
     for chat in chats {
@@ -99,9 +96,9 @@ pub fn cache_from_users_chats(
                     c.access_hash.unwrap_or(0),
                     c.min.is_some(),
                 );
-                if let ChatPhoto::ChatPhoto(p) = &*c.photo {
-                    if let Some(hash) = c.access_hash.filter(|&h| h != 0) {
-                        if c.min.is_none() || !media_index.contains_key(&(chat_id, 0)) {
+                if let ChatPhoto::ChatPhoto(p) = &*c.photo
+                    && let Some(hash) = c.access_hash.filter(|&h| h != 0)
+                        && (c.min.is_none() || !media_index.contains_key(&(chat_id, 0))) {
                             index_dialog_avatar(
                                 media_index,
                                 chat_id,
@@ -114,8 +111,6 @@ pub fn cache_from_users_chats(
                                 p.stripped_thumb.as_deref(),
                             );
                         }
-                    }
-                }
             }
             _ => {}
         }

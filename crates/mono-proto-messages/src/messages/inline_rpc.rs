@@ -172,8 +172,8 @@ fn resolved_from_peer<'a>(
     let mut username = None;
     let mut is_bot = false;
     for user in users {
-        if let User::User(u) = user {
-            if peers::chat_id_for_user(u.id) == peer_id {
+        if let User::User(u) = user
+            && peers::chat_id_for_user(u.id) == peer_id {
                 title = display_name(
                     u.first_name.as_deref(),
                     u.last_name.as_deref(),
@@ -182,7 +182,6 @@ fn resolved_from_peer<'a>(
                 username = u.username.clone();
                 is_bot = u.bot.is_some();
             }
-        }
     }
     if title.is_empty() {
         for chat in chats {
@@ -280,8 +279,8 @@ fn map_inline_result(item: &BotInlineResult, media: &mut MediaIndex) -> InlineBo
                         .or_else(|| Some(indexed.cache_key.clone()));
                     media::insert_media(media, (d.id, 0), indexed);
                 }
-            } else if let Some(photo) = body.photo.as_ref() {
-                if let Photo::Photo(p) = photo.as_ref() {
+            } else if let Some(photo) = body.photo.as_ref()
+                && let Photo::Photo(p) = photo.as_ref() {
                     let cache_key = format!("photo:{}", p.id);
                     if let Some(indexed) =
                         media::media_ref_from_photo_with_thumbs(photo.as_ref(), cache_key)
@@ -293,7 +292,6 @@ fn map_inline_result(item: &BotInlineResult, media: &mut MediaIndex) -> InlineBo
                         media::insert_media(media, (p.id, 0), indexed);
                     }
                 }
-            }
             InlineBotResultDto {
                 id: body.id.clone(),
                 kind: body.type_.clone(),

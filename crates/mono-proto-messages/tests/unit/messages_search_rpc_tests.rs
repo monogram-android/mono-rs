@@ -2,6 +2,71 @@ use super::*;
 use mono_proto::latest::api::{PeerChannelConstructor, PeerChatConstructor, PeerUserConstructor};
 
 #[test]
+fn global_filters_accept_supported_names_and_reject_invalid_ones() {
+    assert!(matches!(
+        global_search_filter("").unwrap(),
+        MessagesFilter::InputMessagesFilterEmpty(_)
+    ));
+    for name in [
+        "photo_video",
+        "document",
+        "url",
+        "gif",
+        "voice",
+        "music",
+        "photos",
+        "videos",
+        "chat_photos",
+    ] {
+        let filter = global_search_filter(name).unwrap();
+        assert_eq!(
+            crate::messages_search::messages_filter_key(&filter),
+            Some(name)
+        );
+    }
+    for name in ["pinned", "unknown"] {
+        assert!(global_search_filter(name).is_err());
+    }
+}
+
+#[test]
+fn global_search_request_preserves_fields_and_encodes_filter() {
+    use mono_proto::latest::api::{
+        InputMessagesFilterPhotosConstructor, InputPeerEmptyConstructor,
+    };
+    let peers = HashMap::new();
+    let request = global_search_request(&peers, "query", "photos", 42, 0, 77, 500, 1).unwrap();
+    assert_eq!(request.flags, MessagesSearchGlobalRequest::FOLDER_ID_FLAG);
+    assert_eq!(request.folder_id, Some(1));
+    assert_eq!(request.q, "query");
+    assert_eq!((request.min_date, request.max_date), (0, 0));
+    assert_eq!(
+        (request.offset_rate, request.offset_id, request.limit),
+        (42, 77, 100)
+    );
+    assert!(matches!(
+        *request.filter,
+        MessagesFilter::InputMessagesFilterPhotos(_)
+    ));
+    let bytes = crate::rpc::encode_boxed_bytes(&request).unwrap();
+    for id in [
+        MessagesSearchGlobalRequest::ID,
+        InputMessagesFilterPhotosConstructor::ID,
+        InputPeerEmptyConstructor::ID,
+    ] {
+        assert!(bytes.windows(4).any(|window| window == id.to_le_bytes()));
+    }
+    let empty = global_search_request(&peers, "", "", 0, 0, 0, 0, 0).unwrap();
+    assert_eq!(empty.limit, 1);
+    assert!(matches!(
+        *empty.filter,
+        MessagesFilter::InputMessagesFilterEmpty(_)
+    ));
+    assert!(global_search_request(&peers, "", "photos", 0, 123, 0, 10, 0).is_err());
+    assert!(global_search_request(&peers, "", "pinned", 0, 0, 0, 10, 0).is_err());
+}
+
+#[test]
 fn people_are_user_peers() {
     let user = Peer::PeerUser(PeerUserConstructor { user_id: 7 });
     let chat = Peer::PeerChat(PeerChatConstructor { chat_id: 3 });

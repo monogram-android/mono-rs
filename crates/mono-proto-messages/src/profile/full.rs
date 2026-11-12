@@ -85,14 +85,13 @@ pub(crate) fn index_user_avatar(
     personal_photo: Option<&Photo>,
 ) -> Option<String> {
     let cache_key = format!("avatar:{peer_chat_id}");
-    if let Some(photo) = profile_photo.or(personal_photo) {
-        if let Some(media) = media::media_ref_from_photo(photo, cache_key.clone()) {
+    if let Some(photo) = profile_photo.or(personal_photo)
+        && let Some(media) = media::media_ref_from_photo(photo, cache_key.clone()) {
             return Some(media::index_avatar(media_index, peer_chat_id, media));
         }
-    }
-    if let User::User(u) = user {
-        if let Some(photo) = u.photo.as_ref() {
-            if let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref() {
+    if let User::User(u) = user
+        && let Some(photo) = u.photo.as_ref()
+            && let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref() {
                 let access_hash = u.access_hash.unwrap_or(0);
                 let has_video = p.has_video.is_some();
                 let media = media::media_ref_peer_photo(
@@ -107,8 +106,6 @@ pub(crate) fn index_user_avatar(
                 );
                 return Some(media::index_avatar(media_index, peer_chat_id, media));
             }
-        }
-    }
     None
 }
 

@@ -34,6 +34,55 @@ fn known_hashes() {
 }
 
 #[test]
+fn message_key_and_quick_ack_match_concatenated_sha256() {
+    let auth_key: Vec<u8> = (0..=255).collect();
+    for direction in [Direction::ClientToServer, Direction::ServerToClient] {
+        let x = if direction == Direction::ClientToServer {
+            0
+        } else {
+            8
+        };
+        for len in [0, 1, 31, 32, 63, 64, 65, 1024, 512 * 1024] {
+            let payload: Vec<u8> = (0..len).map(|n| n as u8).collect();
+            let mut input = auth_key[88 + x..120 + x].to_vec();
+            input.extend_from_slice(&payload);
+            let hash = sha256(&input);
+            assert_eq!(
+                message_key(&auth_key, &payload, direction).unwrap(),
+                hash[8..24]
+            );
+            assert_eq!(
+                quick_ack_token(&auth_key, &payload, direction).unwrap(),
+                u32::from_le_bytes(hash[..4].try_into().unwrap()) | 0x8000_0000
+            );
+        }
+    }
+    assert!(message_key(&[0; 127], &[], Direction::ServerToClient).is_err());
+    assert!(quick_ack_token(&[0; 127], &[], Direction::ClientToServer).is_err());
+}
+
+#[test]
+#[ignore = "manual message-key microbenchmark"]
+fn benchmark_message_key_large_payload() {
+    use std::{hint::black_box, time::Instant};
+    let auth_key = [7_u8; 256];
+    let payload = vec![5_u8; 512 * 1024];
+    let iterations = 1000;
+    let start = Instant::now();
+    for _ in 0..iterations {
+        black_box(
+            message_key(
+                black_box(&auth_key),
+                black_box(&payload),
+                Direction::ServerToClient,
+            )
+            .unwrap(),
+        );
+    }
+    eprintln!("{iterations} 512 KiB message keys: {:?}", start.elapsed());
+}
+
+#[test]
 fn encrypted_message_round_trip_and_authentication() {
     let auth_key: Vec<u8> = (0_u8..=255).collect();
     let body = [0x78, 0x56, 0x34, 0x12];

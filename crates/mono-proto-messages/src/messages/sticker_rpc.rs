@@ -193,11 +193,10 @@ fn sticker_set_for_document(
     if let Some(indexed) = media.values().find(|item| match item.location {
         MediaLocation::Document { id, .. } => id == document_id,
         _ => false,
-    }) {
-        if let (Some(id), Some(hash)) = (indexed.sticker_set_id, indexed.sticker_set_access_hash) {
+    })
+        && let (Some(id), Some(hash)) = (indexed.sticker_set_id, indexed.sticker_set_access_hash) {
             return Ok((id, hash));
         }
-    }
     let fetched = media::fetch_custom_emoji(snapshot, api_id, document_id)?;
     match (fetched.sticker_set_id, fetched.sticker_set_access_hash) {
         (Some(id), Some(hash)) => Ok((id, hash)),

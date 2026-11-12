@@ -26,7 +26,7 @@ use mono_proto_runtime::{request_control, scheduler, tcp};
 use mono_proto_storage::client_session::ChannelRecovery;
 use mono_proto_storage::update_journal::{DurableBatch, is_durable};
 use mono_proto_types::MtprotoError;
-use mono_proto_types::collections::{HashMap, HashMapExt, HashSet, HashSetExt};
+use mono_proto_types::collections::{HashMap, HashSet};
 use mono_proto_types::dto::{ChannelCursorDto, UpdateBatchDto, UpdateDrainDto};
 use mono_proto_types::events::{OutgoingMessageResult, UpdateEventDto};
 use mono_proto_types::peers::channel_id_from_chat_id;
@@ -213,28 +213,51 @@ pub fn stage_outgoing_results(
 
 pub fn pending_update_batches(handle: u64) -> Result<Vec<UpdateBatchDto>, MtprotoError> {
     let client = get_client(handle)?;
-    let (session_id, dirty) = {
+    pending_update_batches_with(&client, || {})
+}
+
+fn pending_update_batches_with(
+    client: &Client,
+    after_save: impl FnOnce(),
+) -> Result<Vec<UpdateBatchDto>, MtprotoError> {
+    // Later arrivals are not necessarily in the completed save and must stay pending.
+    let (session_id, generation, captured, dirty) = {
         let d = client.data.lock();
         if d.journal.batches.is_empty() {
             return Ok(Vec::new());
         }
-        (d.home_session_id, d.persist_epoch != d.persisted_epoch)
+        (
+            d.home_session_id,
+            d.journal.account_generation,
+            d.journal.pending(),
+            d.persist_epoch != d.persisted_epoch,
+        )
     };
     if dirty {
-        persist_journal_sync(&client, session_id)?;
+        persist_journal_sync(client, session_id)?;
+        after_save();
     }
     let mut d = client.data.lock();
     if !session_lease_valid(&d, session_id) {
         return Err(expired_session_lease());
     }
-    let generation = d.journal.account_generation;
-    let batches = d
+    if d.journal.account_generation != generation {
+        return Ok(Vec::new());
+    }
+    let current_ids: HashSet<_> = d
         .journal
-        .pending()
+        .batches
         .iter()
+        .map(|batch| batch.batch_id)
+        .collect();
+    let batches: Vec<_> = captured
+        .iter()
+        .filter(|batch| current_ids.contains(&batch.batch_id))
         .map(|batch| batch_dto(generation, batch))
         .collect();
-    std::sync::Arc::make_mut(&mut d.journal).mark_all_delivered();
+    if let Some(last) = batches.last() {
+        std::sync::Arc::make_mut(&mut d.journal).mark_delivered(last.batch_id);
+    }
     Ok(batches)
 }
 
@@ -666,7 +689,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                     api_id,
                     &mut peers,
                     &mut media,
-                    &mut channel_pts,
+                    &channel_pts,
                     &lazy_batch,
                 )
             }) {

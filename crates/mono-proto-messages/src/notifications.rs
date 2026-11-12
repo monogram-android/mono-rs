@@ -345,7 +345,7 @@ pub fn get_notify_exceptions(
 
 fn b64url_decode(input: &str) -> Result<Vec<u8>, MtprotoError> {
     let mut padded = input.replace('-', "+").replace('_', "/");
-    while padded.len() % 4 != 0 {
+    while !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
     decode_std_base64(&padded).ok_or_else(|| MtprotoError::Message("push payload invalid".into()))
@@ -373,7 +373,7 @@ fn decode_std_base64(input: &str) -> Option<Vec<u8>> {
         }
     }
     let bytes = input.as_bytes();
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return None;
     }
     let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
@@ -490,7 +490,7 @@ pub fn encrypt_push_payload_for_test(secret: &[u8], json: &str) -> Result<String
     if pad < 12 {
         pad += 16;
     }
-    plaintext.extend(std::iter::repeat(0xAB).take(pad));
+    plaintext.extend(std::iter::repeat_n(0xAB, pad));
     let msg_key = message_key(secret, &plaintext, Direction::ServerToClient)
         .map_err(|_| MtprotoError::Message("push encrypt failed".into()))?;
     let (aes_key, aes_iv) = message_aes_key_iv(secret, &msg_key, Direction::ServerToClient)

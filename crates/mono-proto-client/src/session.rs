@@ -103,9 +103,9 @@ pub fn copy_authorization_to_dc(
         AuthImportAuthorizationRequest,
     };
     use mono_proto_storage::client_session::DcAuthKey;
-    if target_dc != state.snapshot.dc_id {
-        if let Some(cached) = state.dc_auth_keys.get(&target_dc) {
-            if cached.key.len() == 256 {
+    if target_dc != state.snapshot.dc_id
+        && let Some(cached) = state.dc_auth_keys.get(&target_dc)
+            && cached.key.len() == 256 {
                 let mut dest = fork_session(&state.snapshot);
                 dest.dc_id = target_dc;
                 dest.clear_auth_key();
@@ -113,8 +113,6 @@ pub fn copy_authorization_to_dc(
                 dest.server_salt = cached.salt;
                 return Ok(dest);
             }
-        }
-    }
     let exported: AuthExportedAuthorization = mono_proto_runtime::api_invoke::invoke_api(
         &mut state.snapshot,
         state.api_id,
@@ -137,9 +135,9 @@ pub fn copy_authorization_to_dc(
     )?;
     // The destination snapshot leaves this lane; never retain its TCP here.
     mono_proto_runtime::rpc::drop_live_transport();
-    if target_dc != state.snapshot.dc_id {
-        if let Some(key) = dest.auth_key.clone() {
-            if key.len() == 256 {
+    if target_dc != state.snapshot.dc_id
+        && let Some(key) = dest.auth_key.clone()
+            && key.len() == 256 {
                 state.dc_auth_keys.insert(
                     target_dc,
                     DcAuthKey {
@@ -148,8 +146,6 @@ pub fn copy_authorization_to_dc(
                     },
                 );
             }
-        }
-    }
     Ok(dest)
 }
 
@@ -239,9 +235,9 @@ pub fn ensure_ready_after_migrate_with_binding(
     err: MtprotoError,
     negotiate: impl FnOnce(&[u8], i32, i64) -> Result<crate::bind_temp::BoundTemp, MtprotoError>,
 ) -> Result<(), MtprotoError> {
-    if let MtprotoError::Message(msg) = &err {
-        if let Some(rest) = msg.strip_prefix("MIGRATE_") {
-            if let Ok(dc) = rest.parse::<i32>() {
+    if let MtprotoError::Message(msg) = &err
+        && let Some(rest) = msg.strip_prefix("MIGRATE_")
+            && let Ok(dc) = rest.parse::<i32>() {
                 if state.user_id.is_some()
                     && state.snapshot.auth_key.as_ref().map(|key| key.len()) == Some(256)
                 {
@@ -298,8 +294,6 @@ pub fn ensure_ready_after_migrate_with_binding(
                 ensure_auth_key(state)?;
                 return Ok(());
             }
-        }
-    }
     Err(err)
 }
 

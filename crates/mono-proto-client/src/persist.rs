@@ -1,6 +1,8 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "test-support"))]
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -8,7 +10,6 @@ use parking_lot::Mutex;
 
 use crate::session_store::FileSessionStore;
 use mono_proto_media::persistence::{media_from_index, media_order_from_index};
-use mono_proto_runtime::tcp;
 use mono_proto_storage::client_session::ClientSession;
 use mono_proto_types::MtprotoError;
 
@@ -34,7 +35,7 @@ fn persist_generation(path: &Path) -> Arc<AtomicU64> {
 }
 
 fn bump_persist_clock(clock: &AtomicU64) {
-    let _ = clock.fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+    let _ = clock.try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
         Some(value.saturating_add(1))
     });
 }
@@ -226,7 +227,6 @@ pub fn persist_updates_data(client: &Client, session_id: i64) -> Result<bool, Mt
 #[cfg(any(test, feature = "test-support"))]
 pub static FORCE_STALE_SAVES: AtomicU32 = AtomicU32::new(0);
 
-use std::sync::atomic::AtomicU32;
 
 pub fn persist_journal_sync(client: &Client, session_id: i64) -> Result<(), MtprotoError> {
     let mut last = None;

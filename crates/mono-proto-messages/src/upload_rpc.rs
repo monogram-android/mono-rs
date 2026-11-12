@@ -82,7 +82,7 @@ fn part_count_for(size: u64, part_size: usize) -> i32 {
     if size == 0 || part_size == 0 {
         0
     } else {
-        ((size + part_size as u64 - 1) / part_size as u64) as i32
+        size.div_ceil(part_size as u64) as i32
     }
 }
 
@@ -221,11 +221,10 @@ pub fn send_uploaded_with_options(
         peers,
         media_index,
     );
-    if let Ok(ref result) = mapped {
-        if let Some(ack) = implicit_ack(&updates, result, random) {
+    if let Ok(ref result) = mapped
+        && let Some(ack) = implicit_ack(&updates, result, random) {
             crate::rpc::enqueue_response(snapshot.dc_id, &ack)?;
         }
-    }
     crate::rpc::enqueue_response(snapshot.dc_id, &updates)?;
     let mut result = mapped?;
     let dto = match &mut result {

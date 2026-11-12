@@ -30,9 +30,9 @@ pub fn join_chat(
     chat_id: i64,
 ) -> Result<JoinChatDto, MtprotoError> {
     if channel_id_from_chat_id(chat_id).is_some() {
-        let cached = peers::require_usable_peer(&state.peers, chat_id)?;
+        let cached = peers::require_usable_peer(state.peers, chat_id)?;
         let response: MessagesChatInviteJoinResult = crate::api_invoke::invoke_api(
-            &mut state.snapshot,
+            state.snapshot,
             state.api_id,
             ChannelsJoinChannelRequest {
                 channel: Box::new(InputChannel::InputChannel(InputChannelConstructor {
@@ -52,7 +52,7 @@ pub fn join_chat(
     }
     if chat_id < 0 {
         let response: MessagesInvitedUsers = crate::api_invoke::invoke_api(
-            &mut state.snapshot,
+            state.snapshot,
             state.api_id,
             MessagesAddChatUserRequest {
                 chat_id: -chat_id,
@@ -74,9 +74,9 @@ pub fn join_chat(
 }
 
 pub fn unblock_user(state: &mut MembershipContext<'_>, chat_id: i64) -> Result<(), MtprotoError> {
-    let cached = peers::require_usable_peer(&state.peers, chat_id)?;
+    let cached = peers::require_usable_peer(state.peers, chat_id)?;
     let _: Bool = crate::api_invoke::invoke_api(
-        &mut state.snapshot,
+        state.snapshot,
         state.api_id,
         ContactsUnblockRequest {
             flags: 0,
@@ -95,8 +95,8 @@ fn grant_from_updates(
 ) -> JoinChatDto {
     let (users, chats) = updates_users_chats(updates);
     cache_from_users_chats(
-        &mut state.peers,
-        &mut state.media,
+        state.peers,
+        state.media,
         users.into_iter(),
         chats.iter().cloned(),
     );

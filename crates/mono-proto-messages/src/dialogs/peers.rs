@@ -49,6 +49,11 @@ pub fn cache_from_users_chats(
                 u.access_hash.unwrap_or(0),
                 u.min.is_some(),
             );
+            if u.min.is_none()
+                && u.photo.as_deref().is_some_and(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_)))
+            {
+                media_index.remove(&(chat_id, 0));
+            }
             if let Some(photo) = u.photo.as_ref()
                 && let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref()
                     && let Some(hash) = u.access_hash.filter(|&h| h != 0)
@@ -72,6 +77,9 @@ pub fn cache_from_users_chats(
             TlChat::Chat(c) => {
                 let chat_id = chat_id_for_chat(c.id);
                 peers::upsert_cached_peer(peers, chat_id, PeerKind::Chat, c.id, 0, false);
+                if matches!(c.photo.as_ref(), ChatPhoto::ChatPhotoEmpty(_)) {
+                    media_index.remove(&(chat_id, 0));
+                }
                 if let ChatPhoto::ChatPhoto(p) = &*c.photo {
                     index_dialog_avatar(
                         media_index,
@@ -96,6 +104,9 @@ pub fn cache_from_users_chats(
                     c.access_hash.unwrap_or(0),
                     c.min.is_some(),
                 );
+                if c.min.is_none() && matches!(c.photo.as_ref(), ChatPhoto::ChatPhotoEmpty(_)) {
+                    media_index.remove(&(chat_id, 0));
+                }
                 if let ChatPhoto::ChatPhoto(p) = &*c.photo
                     && let Some(hash) = c.access_hash.filter(|&h| h != 0)
                         && (c.min.is_none() || !media_index.contains_key(&(chat_id, 0))) {

@@ -458,21 +458,23 @@ pub struct RangeIdentity {
     pub dc_id: i32,
     pub size: i64,
     pub version: i32,
+    pub rendition: String,
 }
 
 impl RangeIdentity {
-    fn to_bytes(&self) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![0u8; 32];
         bytes[0..8].copy_from_slice(&self.file_id.to_le_bytes());
         bytes[8..16].copy_from_slice(&self.access_hash.to_le_bytes());
         bytes[16..20].copy_from_slice(&self.dc_id.to_le_bytes());
         bytes[20..28].copy_from_slice(&self.size.to_le_bytes());
         bytes[28..32].copy_from_slice(&self.version.to_le_bytes());
+        bytes.extend_from_slice(self.rendition.as_bytes());
         bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != 32 {
+        if bytes.len() <= 32 {
             return None;
         }
         Some(Self {
@@ -481,6 +483,7 @@ impl RangeIdentity {
             dc_id: i32::from_le_bytes(bytes[16..20].try_into().ok()?),
             size: i64::from_le_bytes(bytes[20..28].try_into().ok()?),
             version: i32::from_le_bytes(bytes[28..32].try_into().ok()?),
+            rendition: String::from_utf8(bytes[32..].to_vec()).ok()?,
         })
     }
 }
@@ -511,12 +514,21 @@ pub fn location_identity(
         } => (*photo_id, *access_hash, *dc_id),
         crate::media::MediaLocation::Inline { .. } => return None,
     };
+    let rendition = match location {
+        crate::media::MediaLocation::Document { thumb_size, .. } => format!("document:{thumb_size}"),
+        crate::media::MediaLocation::Photo { thumb_size, .. } => format!("photo:{thumb_size}"),
+        crate::media::MediaLocation::PeerPhoto { peer_kind, peer_id, big, .. } => {
+            format!("peer:{peer_kind:?}:{peer_id}:{big}")
+        }
+        crate::media::MediaLocation::Inline { .. } => return None,
+    };
     Some(RangeIdentity {
         file_id,
         access_hash,
         dc_id: if dc_id == 0 { dc_fallback } else { dc_id },
         size,
-        version: 0,
+        version: 1,
+        rendition,
     })
 }
 
@@ -1542,7 +1554,9 @@ pub fn download_media_range_batched_streaming_capped(
                     break 'download;
                 }
                 if last_part {
-                    if let Some(ranges) = missing.as_mut() {
+                    if media.file_size.filter(|size| *size > 0).is_none()
+                        && let Some(ranges) = missing.as_mut()
+                    {
                         ranges.clip_to_end(written_end);
                         store_ranges(dest_path, ranges);
                     }

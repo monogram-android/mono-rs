@@ -229,7 +229,7 @@ pub fn media_ref_from_photo_with_thumbs(photo: &Photo, cache_key: String) -> Opt
     };
     let sizes: Vec<PhotoSize> = vector_boxed_items(&ph.sizes).cloned().collect();
     let (full_ty, full_inline) = pick_photo_size(&sizes)?;
-    let thumb = pick_document_thumb_size(&sizes);
+    let thumb = pick_thumb_size(&sizes);
     let location = photo_file_location(ph, full_ty.clone(), full_inline);
     let (thumb_cache_key, thumb_location) = match thumb {
         Some((ty, inline)) if ty != full_ty => (
@@ -810,6 +810,7 @@ pub fn index_message_media(msg: &Message, index: &mut MediaIndex) -> IndexedMess
         return IndexedMessageMedia::default();
     };
     let chat_id = peer_chat_id(&m.peer_id);
+    index.remove(&(chat_id, m.id));
     let Some(media) = m.media.as_ref() else {
         return match m.rich_message.as_ref().map(|rich| rich.as_ref()) {
             Some(RichMessage::RichMessage(body)) => {

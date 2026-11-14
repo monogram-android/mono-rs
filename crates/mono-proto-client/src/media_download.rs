@@ -395,6 +395,18 @@ pub fn download_message_media_range(
     kind: media::MediaDownloadKind,
     offset: Option<i64>,
 ) -> Result<String, MtprotoError> {
+    download_message_media_range_checked(handle, chat_id, message_id, dest_path, kind, offset, None)
+}
+
+pub fn download_message_media_range_checked(
+    handle: u64,
+    chat_id: i64,
+    message_id: i32,
+    dest_path: String,
+    kind: media::MediaDownloadKind,
+    offset: Option<i64>,
+    expected_cache_key: Option<&str>,
+) -> Result<String, MtprotoError> {
     let client = get_client(handle)?;
     let _policy = mono_proto_runtime::transfer_policy::bind(std::sync::Arc::clone(&client.policy));
     schedule_transfer_config(handle);
@@ -515,6 +527,9 @@ pub fn download_message_media_range(
             ))
         })?
     };
+    if expected_cache_key.is_some_and(|key| key != media.cache_key) {
+        return Err(MtprotoError::Message("media identity changed".into()));
+    }
     let dest = Path::new(&dest_path);
     let first = download_media_range_on_lane(handle, &client, &home, api_id, &media, dest, offset);
     match first {
@@ -550,6 +565,9 @@ pub fn download_message_media_range(
             let Ok(new_media) = refreshed else {
                 return Err(err);
             };
+            if !same_download_identity(&media, &new_media) {
+                return Err(MtprotoError::Message("media identity changed during refresh".into()));
+            }
             // Always retry getFile once after the source refetch, even if the
             // token looks unchanged (server may have renewed the same bytes).
             // https://core.telegram.org/api/file-references
@@ -585,6 +603,20 @@ pub fn download_message_media_range(
             )
         }
         Err(err) => Err(err),
+    }
+}
+
+fn same_download_identity(a: &media::MediaRef, b: &media::MediaRef) -> bool {
+    if a.cache_key != b.cache_key {
+        return false;
+    }
+    match (
+        media::location_identity(&a.location, 0, 0),
+        media::location_identity(&b.location, 0, 0),
+    ) {
+        (Some(a), Some(b)) => a.file_id == b.file_id && a.rendition == b.rendition,
+        (None, None) => a.location == b.location,
+        _ => false,
     }
 }
 
@@ -827,7 +859,13 @@ pub fn try_alternate_thumb_sizes(
             Ok(path) => {
                 let working = alt.location.clone();
                 let _ = with_client_mut(handle, |state| {
-                    if let Some(indexed) = state.media.get_mut(&(chat_id, message_id)) {
+                    if !home_lease_ok(state, home.session_id) {
+                        return Err(expired_session_lease());
+                    }
+                    if let Some(indexed) = state.media.get_mut(&(chat_id, message_id))
+                        && media::media_for_download(indexed, media::MediaDownloadKind::Thumb)
+                            .is_ok_and(|current| same_download_identity(&current, media))
+                    {
                         media::remember_thumb_location(indexed, working);
                     }
                     Ok(())
@@ -868,7 +906,12 @@ pub fn try_alternate_video_avatar_sizes(
             Ok(path) => {
                 let working = alt.location.clone();
                 let _ = with_client_mut(handle, |state| {
-                    if let Some(indexed) = state.media.get_mut(&(chat_id, message_id)) {
+                    if !home_lease_ok(state, home.session_id) {
+                        return Err(expired_session_lease());
+                    }
+                    if let Some(indexed) = state.media.get_mut(&(chat_id, message_id))
+                        && same_download_identity(indexed, media)
+                    {
                         indexed.location = working;
                     }
                     Ok(())

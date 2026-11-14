@@ -299,6 +299,7 @@ enum PersistClass {
     Avatar,
     Message,
     ZeroDocument,
+    CatalogDocument,
     Instant,
     WebpageOwner,
 }
@@ -331,6 +332,14 @@ fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
         return PersistClass::Instant;
     }
     if key.1 == 0 {
+        // The picker keeps catalog ids ready for the account lifetime. Evicting
+        // their locations makes regular stickers fall back to the custom-emoji API.
+        if matches!(media.location, MediaLocation::Document { .. })
+            && (media.sticker_set_id.zip(media.sticker_set_access_hash).is_some()
+                || matches!(media.refresh_source, Some(crate::media_location::MediaRefreshSource::SavedGifs)))
+        {
+            return PersistClass::CatalogDocument;
+        }
         return PersistClass::ZeroDocument;
     }
     PersistClass::Message
@@ -338,7 +347,7 @@ fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
 
 fn class_cap(class: PersistClass) -> Option<usize> {
     match class {
-        PersistClass::Avatar | PersistClass::WebpageOwner => None,
+        PersistClass::Avatar | PersistClass::CatalogDocument | PersistClass::WebpageOwner => None,
         PersistClass::Message => Some(MESSAGE_MEDIA_CAP),
         PersistClass::ZeroDocument => Some(ZERO_ID_DOCUMENT_CAP),
         PersistClass::Instant => Some(INSTANT_VIEW_CAP),
@@ -395,7 +404,7 @@ pub fn bound_media_index(index: &mut MediaIndex) {
     let mut drop_keys = crate::collections::HashSet::default();
     for (key, media) in index.iter().rev() {
         let (slot, cap) = match persist_class(key, media) {
-            PersistClass::Avatar | PersistClass::WebpageOwner => continue,
+            PersistClass::Avatar | PersistClass::CatalogDocument | PersistClass::WebpageOwner => continue,
             PersistClass::Message => (0, MESSAGE_MEDIA_CAP),
             PersistClass::ZeroDocument => (1, ZERO_ID_DOCUMENT_CAP),
             PersistClass::Instant => (2, INSTANT_VIEW_CAP),

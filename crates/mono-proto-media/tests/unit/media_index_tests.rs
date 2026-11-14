@@ -51,12 +51,29 @@ fn bounding_mixed_classes_preserves_values_and_global_fifo_order() {
     let mut document = avatar.clone();
     document.cache_key = "document:7".into();
     document.location = MediaLocation::Inline { bytes: vec![1, 2, 3], extension: "jpg".into() };
+    let mut catalog = document.clone();
+    catalog.location = MediaLocation::Document {
+        id: 7,
+        access_hash: 1,
+        file_reference: vec![1],
+        thumb_size: String::new(),
+        dc_id: 2,
+        mime_type: "image/webp".into(),
+    };
+    catalog.sticker_set_id = Some(1);
+    catalog.sticker_set_access_hash = Some(2);
+    let mut gif = catalog.clone();
+    gif.sticker_set_id = None;
+    gif.sticker_set_access_hash = None;
+    gif.refresh_source = Some(crate::media_location::MediaRefreshSource::SavedGifs);
     let mut mixed = MediaIndex::default();
     for n in 1..=1100 {
         mixed.insert((n, 0), document.clone());
         mixed.insert((n, 1), document.clone());
         mixed.insert((n, INSTANT_VIEW_MEDIA_MSG), document.clone());
         mixed.insert((n + 10000, 0), avatar.clone());
+        insert_media(&mut mixed, (n + 20000, 0), catalog.clone());
+        insert_media(&mut mixed, (n + 30000, 0), gif.clone());
     }
     // Replacing an existing entry must not promote its FIFO position.
     mixed.insert((1, 1), document);
@@ -70,7 +87,7 @@ fn bounding_mixed_classes_preserves_values_and_global_fifo_order() {
         for key in keys.into_iter().take(overflow) { reference.shift_remove(&key); }
     }
     bound_media_index(&mut mixed);
-    assert_eq!(mixed.len(), 1100 + MESSAGE_MEDIA_CAP + ZERO_ID_DOCUMENT_CAP + INSTANT_VIEW_CAP);
+    assert_eq!(mixed.len(), 3300 + MESSAGE_MEDIA_CAP + ZERO_ID_DOCUMENT_CAP + INSTANT_VIEW_CAP);
     assert_eq!(mixed.iter().collect::<Vec<_>>(), reference.iter().collect::<Vec<_>>());
     bound_media_index(&mut mixed);
     assert_eq!(mixed.iter().collect::<Vec<_>>(), reference.iter().collect::<Vec<_>>());

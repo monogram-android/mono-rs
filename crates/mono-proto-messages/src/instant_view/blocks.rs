@@ -470,7 +470,11 @@ pub fn channel_json(chat: &Chat) -> Value {
 
 pub fn channel_photo_key(chat_id: i64, photo: &ChatPhoto) -> Option<String> {
     match photo {
-        ChatPhoto::ChatPhoto(_) => Some(format!("avatar:{chat_id}")),
+        ChatPhoto::ChatPhoto(p) => Some(media::avatar_cache_key(
+            chat_id,
+            p.photo_id,
+            p.has_video.is_some(),
+        )),
         _ => None,
     }
 }

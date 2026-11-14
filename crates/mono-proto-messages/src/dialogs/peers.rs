@@ -129,7 +129,7 @@ pub fn index_dialog_avatar(
     has_video: bool,
     stripped_thumb: Option<&[u8]>,
 ) -> String {
-    let cache_key = media::avatar_cache_key(chat_id, has_video);
+    let cache_key = media::avatar_cache_key(chat_id, photo_id, has_video);
     let media = media::media_ref_peer_photo(
         kind,
         raw_id,

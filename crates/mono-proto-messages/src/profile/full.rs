@@ -88,9 +88,12 @@ pub(crate) fn index_user_avatar(
     profile_photo: Option<&Photo>,
     personal_photo: Option<&Photo>,
 ) -> Option<String> {
-    let cache_key = format!("avatar:{peer_chat_id}");
     if let Some(photo) = profile_photo.or(personal_photo)
-        && let Some(media) = media::media_ref_from_photo(photo, cache_key.clone())
+        && let Photo::Photo(full_photo) = photo
+        && let Some(media) = media::media_ref_from_photo(
+            photo,
+            media::avatar_cache_key(peer_chat_id, full_photo.id, false),
+        )
     {
         return Some(media::index_avatar(media_index, peer_chat_id, media));
     }
@@ -106,7 +109,7 @@ pub(crate) fn index_user_avatar(
             access_hash,
             p.photo_id,
             p.dc_id,
-            media::avatar_cache_key(peer_chat_id, has_video),
+            media::avatar_cache_key(peer_chat_id, p.photo_id, has_video),
             has_video,
             p.stripped_thumb.as_deref(),
         );
@@ -133,7 +136,7 @@ pub(crate) fn index_chat_photo(
         access_hash,
         p.photo_id,
         p.dc_id,
-        media::avatar_cache_key(peer_chat_id, has_video),
+        media::avatar_cache_key(peer_chat_id, p.photo_id, has_video),
         has_video,
         p.stripped_thumb.as_deref(),
     );
@@ -150,7 +153,10 @@ pub(crate) fn index_full_chat_photo(
         ChatFull::ChannelFull(channel) => Some(channel.chat_photo.as_ref()),
         _ => None,
     }?;
-    let cache_key = format!("avatar:{peer_chat_id}");
+    let Photo::Photo(full_photo) = photo else {
+        return None;
+    };
+    let cache_key = media::avatar_cache_key(peer_chat_id, full_photo.id, false);
     let mut entry = media::media_ref_from_photo(photo, cache_key.clone())?;
     if let Some(still) = media::media_ref_from_photo_with_thumbs(photo, cache_key) {
         // Both static and video replacements must retain all download kinds.

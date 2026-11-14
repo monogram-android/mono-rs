@@ -273,11 +273,11 @@ pub fn attach_document_thumbs(
     media.thumb_location = Some(document_file_location(doc, ty, inline));
 }
 
-pub fn avatar_cache_key(chat_id: i64, has_video: bool) -> String {
+pub fn avatar_cache_key(chat_id: i64, photo_id: i64, has_video: bool) -> String {
     if has_video {
-        format!("avatar:{chat_id}:video")
+        format!("avatar:{chat_id}:{photo_id}:video")
     } else {
-        format!("avatar:{chat_id}")
+        format!("avatar:{chat_id}:{photo_id}")
     }
 }
 
@@ -312,11 +312,11 @@ fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
             media.location,
             MediaLocation::Photo { .. } | MediaLocation::Inline { .. }
         )
-        && media
-            .cache_key
-            .strip_prefix("avatar:")
-            .and_then(|id| id.parse::<i64>().ok())
-            == Some(key.0);
+        && (media.cache_key == format!("avatar:{}", key.0)
+            || media
+                .cache_key
+                .strip_prefix(&format!("avatar:{}:", key.0))
+                .is_some_and(|photo_id| photo_id.parse::<i64>().is_ok()));
     if matches!(media.location, MediaLocation::PeerPhoto { .. })
         || is_resolved_video_avatar(media)
         || resolved_static_avatar

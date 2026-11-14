@@ -2,7 +2,7 @@ use super::bind_crypto::encrypt_bind_message;
 use crate::MtprotoError;
 use crate::auth_key::create_temp_auth_key;
 use crate::rpc::SystemClock;
-use mono_proto::codec::{Boxed, Decoder, Limits, TlDecode};
+use mono_proto::codec::{Decoder, Limits, TlDecode};
 use mono_proto::transport::BindAuthKeyInnerConstructor;
 #[cfg(test)]
 use mono_proto_crypto::{aes_ige_decrypt, sha1};
@@ -178,7 +178,7 @@ fn send_v2(
 
 fn v2_pad_len(body_len: usize) -> usize {
     let mut pad = 12;
-    while (32 + body_len + pad) % 16 != 0 {
+    while !(32 + body_len + pad).is_multiple_of(16) {
         pad += 1;
     }
     pad
@@ -288,7 +288,7 @@ fn bind_response_at_depth(
     clock: &impl Clock,
     outer_id: i64,
 ) -> Result<BindResponse, MtprotoError> {
-    if depth > 8 || *remaining == 0 || body.len() < 4 || body.len() % 4 != 0 {
+    if depth > 8 || *remaining == 0 || body.len() < 4 || !body.len().is_multiple_of(4) {
         return Err(malformed_bind());
     }
     *remaining -= 1;
@@ -350,7 +350,7 @@ fn container_accepted(
         let len = u32::from_le_bytes(body[offset..offset + 4].try_into().expect("len")) as usize;
         offset += 4;
         let end = offset.checked_add(len).ok_or_else(malformed_bind)?;
-        if end > body.len() || len < 4 || len % 4 != 0 {
+        if end > body.len() || len < 4 || !len.is_multiple_of(4) {
             return Err(malformed_bind());
         }
         // Fresh containers can retransmit old children; their IDs still need

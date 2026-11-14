@@ -95,8 +95,8 @@ pub fn refresh_home_from_backup(
 ) {
     let now = unix_now();
     let cached = load_config_cache(session_path);
-    if let Some(cached) = cached.as_ref() {
-        if cached.expires > now {
+    if let Some(cached) = cached.as_ref()
+        && cached.expires > now {
             merge_home(home_dc, cached.endpoints.clone());
             write_status(
                 session_path,
@@ -108,7 +108,6 @@ pub fn refresh_home_from_backup(
             );
             return;
         }
-    }
     match fetch_home_options_live(home_dc, api_id, snapshot) {
         Ok((home, server_expires)) => {
             let expires = clamp_expires(server_expires, now);
@@ -449,7 +448,7 @@ fn base64_filter(input: &str) -> String {
 }
 
 fn aes_cbc_decrypt(key: &[u8], iv: &[u8], data: &[u8]) -> Result<Vec<u8>, MtprotoError> {
-    if key.len() != 32 || iv.len() != 16 || data.len() % 16 != 0 {
+    if key.len() != 32 || iv.len() != 16 || !data.len().is_multiple_of(16) {
         return Err(MtprotoError::Message("simple config AES length".into()));
     }
     let cipher = Aes256::new_from_slice(key)
@@ -457,7 +456,7 @@ fn aes_cbc_decrypt(key: &[u8], iv: &[u8], data: &[u8]) -> Result<Vec<u8>, Mtprot
     let mut prev = [0_u8; 16];
     prev.copy_from_slice(iv);
     let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(16) {
+    for chunk in data.as_chunks::<16>().0 {
         let mut raw = [0_u8; 16];
         raw.copy_from_slice(chunk);
         let mut block = Block::<Aes256>::from(raw);

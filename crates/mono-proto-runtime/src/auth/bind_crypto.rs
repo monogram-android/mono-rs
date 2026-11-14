@@ -28,7 +28,7 @@ pub fn encrypt_bind_message(
     plain.extend_from_slice(&40_i32.to_le_bytes());
     plain.extend_from_slice(&body);
     let msg_key = v1_msg_key(&plain);
-    if padding.len() > 15 || (plain.len() + padding.len()) % 16 != 0 {
+    if padding.len() > 15 || !(plain.len() + padding.len()).is_multiple_of(16) {
         return Err(MtprotoError::Message("bind padding".into()));
     }
     plain.extend_from_slice(padding);

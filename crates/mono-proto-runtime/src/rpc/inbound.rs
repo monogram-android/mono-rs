@@ -439,13 +439,12 @@ pub fn parse_container(body: &[u8], depth: usize) -> Result<Vec<InboundEvent>, M
         .read_u32()
         .map_err(|e| MtprotoError::Message(e.to_string()))?;
     // Bare `vector<%Message>` is count+messages. Tolerate a boxed vector ctor.
-    if let Some(peek) = peek_u32(body, decoder.offset()) {
-        if peek == VECTOR {
+    if let Some(peek) = peek_u32(body, decoder.offset())
+        && peek == VECTOR {
             let _ = decoder
                 .read_u32()
                 .map_err(|e| MtprotoError::Message(e.to_string()))?;
         }
-    }
     let count = <i32 as TlDecode>::decode(&mut decoder)
         .map_err(|e| MtprotoError::Message(e.to_string()))? as usize;
     if count > 1024 {

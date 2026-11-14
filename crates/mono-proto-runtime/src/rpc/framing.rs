@@ -36,7 +36,7 @@ impl Clock for SystemClock {
 pub fn make_padding(body_len: usize) -> Result<Vec<u8>, MtprotoError> {
     // 32 + body + padding must be % 16 == 0, padding in 12..=1024.
     let mut pad_len = 12;
-    while (32 + body_len + pad_len) % 16 != 0 {
+    while !(32 + body_len + pad_len).is_multiple_of(16) {
         pad_len += 1;
     }
     let mut padding = vec![0_u8; pad_len];

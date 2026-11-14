@@ -341,7 +341,7 @@ pub fn snapshot() -> Arc<TransferPolicy> {
 }
 
 thread_local! {
-    static BOUND: RefCell<Option<Arc<TransferPolicy>>> = RefCell::new(None);
+    static BOUND: RefCell<Option<Arc<TransferPolicy>>> = const { RefCell::new(None) };
 }
 
 pub struct PolicyGuard {

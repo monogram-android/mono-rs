@@ -170,7 +170,7 @@ impl AuthAdapter {
 impl AuthorizationAdapter for AuthAdapter {
     fn request_parameters(&mut self) -> Result<Vec<u8>, mono_proto_engine::Error> {
         let req = ReqPqMultiRequest {
-            nonce: self.nonce.clone(),
+            nonce: self.nonce,
         };
         encode_boxed(&req).map_err(|e| mono_proto_engine::Error::Authorization(e.to_string()))
     }
@@ -184,7 +184,7 @@ impl AuthorizationAdapter for AuthAdapter {
                 "resPQ nonce mismatch".into(),
             ));
         }
-        self.server_nonce = Some(res.server_nonce.clone());
+        self.server_nonce = Some(res.server_nonce);
 
         let pq = {
             // pq is big-endian bytes representing u64
@@ -220,15 +220,15 @@ impl AuthorizationAdapter for AuthAdapter {
         fill_random(&mut new_nonce_bytes)
             .map_err(|e| mono_proto_engine::Error::Authorization(e.to_string()))?;
         let new_nonce = i256_from_bytes(new_nonce_bytes);
-        self.new_nonce = Some(new_nonce.clone());
+        self.new_nonce = Some(new_nonce);
 
         let inner_bytes = if let Some(expires_in) = self.expires_in {
             encode_boxed(&PQInnerDataTempDcConstructor {
                 pq: res.pq.clone(),
                 p: p_bytes,
                 q: q_bytes,
-                nonce: self.nonce.clone(),
-                server_nonce: res.server_nonce.clone(),
+                nonce: self.nonce,
+                server_nonce: res.server_nonce,
                 new_nonce,
                 dc: inner_data_dc(self.dc_id),
                 expires_in,
@@ -238,8 +238,8 @@ impl AuthorizationAdapter for AuthAdapter {
                 pq: res.pq.clone(),
                 p: p_bytes,
                 q: q_bytes,
-                nonce: self.nonce.clone(),
-                server_nonce: res.server_nonce.clone(),
+                nonce: self.nonce,
+                server_nonce: res.server_nonce,
                 new_nonce,
                 dc: inner_data_dc(self.dc_id),
             })
@@ -252,7 +252,7 @@ impl AuthorizationAdapter for AuthAdapter {
         let fingerprints = match &*res.server_public_key_fingerprints {
             mono_proto::transport::Vector::Vector(v) => &v.field_1,
         };
-        if !fingerprints.iter().any(|fp| *fp == fingerprint) {
+        if !fingerprints.contains(&fingerprint) {
             return Err(mono_proto_engine::Error::Authorization(
                 "RSA fingerprint not accepted by server".into(),
             ));
@@ -261,7 +261,7 @@ impl AuthorizationAdapter for AuthAdapter {
             .map_err(|e| mono_proto_engine::Error::Authorization(e.to_string()))?;
 
         let req = ReqDhParamsRequest {
-            nonce: self.nonce.clone(),
+            nonce: self.nonce,
             server_nonce: res.server_nonce,
             p: self.p.clone().unwrap(),
             q: self.q.clone().unwrap(),
@@ -279,7 +279,7 @@ impl AuthorizationAdapter for AuthAdapter {
                 "server_DH_params_fail".into(),
             ));
         };
-        let server_nonce = self.server_nonce.clone().ok_or_else(|| {
+        let server_nonce = self.server_nonce.ok_or_else(|| {
             mono_proto_engine::Error::Authorization("missing server_nonce".into())
         })?;
         if ok.nonce != self.nonce || ok.server_nonce != server_nonce {
@@ -289,7 +289,6 @@ impl AuthorizationAdapter for AuthAdapter {
         }
         let new_nonce = self
             .new_nonce
-            .clone()
             .ok_or_else(|| mono_proto_engine::Error::Authorization("missing new_nonce".into()))?;
         let (aes_key, aes_iv) =
             temporary_aes_key_iv(&i256_to_bytes(&new_nonce), &i128_to_bytes(&server_nonce));
@@ -369,8 +368,8 @@ impl AuthorizationAdapter for AuthAdapter {
             Some((i64::from(inner.server_time) * 1_000_000).saturating_sub(received_at));
 
         let client_inner = mono_proto::transport::ClientDhInnerDataConstructor {
-            nonce: self.nonce.clone(),
-            server_nonce: server_nonce.clone(),
+            nonce: self.nonce,
+            server_nonce: server_nonce,
             retry_id: 0,
             g_b: g_b_bytes,
         };
@@ -389,7 +388,7 @@ impl AuthorizationAdapter for AuthAdapter {
             .map_err(|e| mono_proto_engine::Error::Authorization(e.to_string()))?;
 
         let req = SetClientDhParamsRequest {
-            nonce: self.nonce.clone(),
+            nonce: self.nonce,
             server_nonce,
             encrypted_data: encrypted,
         };
@@ -408,9 +407,8 @@ impl AuthorizationAdapter for AuthAdapter {
             .ok_or_else(|| mono_proto_engine::Error::Authorization("missing auth_key".into()))?;
         let new_nonce = self
             .new_nonce
-            .clone()
             .ok_or_else(|| mono_proto_engine::Error::Authorization("missing new_nonce".into()))?;
-        let server_nonce = self.server_nonce.clone().ok_or_else(|| {
+        let server_nonce = self.server_nonce.ok_or_else(|| {
             mono_proto_engine::Error::Authorization("missing server_nonce".into())
         })?;
         match answer {
@@ -420,7 +418,7 @@ impl AuthorizationAdapter for AuthAdapter {
                         "DH completion nonce mismatch".into(),
                     ));
                 }
-                let expected = new_nonce_hash(&i256_to_bytes(&new_nonce), &auth_key, 1);
+                let expected = new_nonce_hash(&i256_to_bytes(&new_nonce), auth_key, 1);
                 let got = i128_to_bytes(&ok.new_nonce_hash1);
                 if got != expected {
                     return Err(mono_proto_engine::Error::Authorization(
@@ -571,7 +569,7 @@ fn trim_padded_plain_packet(packet: &[u8]) -> &[u8] {
     }
     let length = u32::from_le_bytes(packet[16..20].try_into().expect("plain length")) as usize;
     let total = 20usize.saturating_add(length);
-    if length > 0 && length % 4 == 0 && total <= packet.len() {
+    if length > 0 && length.is_multiple_of(4) && total <= packet.len() {
         &packet[..total]
     } else {
         packet

@@ -230,3 +230,9 @@ impl FloodScope {
         )))
     }
 }
+
+impl Default for FloodScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}

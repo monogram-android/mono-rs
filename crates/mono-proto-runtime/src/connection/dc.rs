@@ -117,5 +117,5 @@ pub fn extra_reconnect_same_host(pinned: &[&str], extra_addr: &str) -> bool {
         .first()
         .and_then(|addr| addr.rsplit_once(':').map(|(host, _)| host));
     let host = extra_addr.rsplit_once(':').map(|(h, _)| h);
-    extra_addr.ends_with(":443") && host == home_host && !pinned.iter().any(|p| *p == extra_addr)
+    extra_addr.ends_with(":443") && host == home_host && !pinned.contains(&extra_addr)
 }

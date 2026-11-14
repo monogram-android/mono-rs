@@ -116,6 +116,10 @@ mod gzip_tests;
 #[path = "../../tests/unit/rpc_push_tests.rs"]
 mod push_tests;
 #[cfg(test)]
+#[path = "../../tests/unit/transport_performance.rs"]
+mod transport_performance;
+
+#[cfg(test)]
 #[path = "../../tests/unit/rpc_wire_tests.rs"]
 mod wire_tests;
 

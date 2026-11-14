@@ -388,11 +388,19 @@ impl TcpConnection {
             .next()
             .ok_or_else(|| ProxyError::Handshake("proxy address did not resolve".into()))?;
         check()?;
-        let mut stream = TcpStream::connect_timeout(&socket, timeout)?;
+        let stream = TcpStream::connect_timeout(&socket, timeout)?;
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
         stream.set_nodelay(true)?;
-        let socket = std::sync::Arc::new(stream.try_clone()?);
+        #[cfg(windows)]
+        let (socket, mut stream) = {
+            // Windows can reject shutdown on the duplicate after a timed connect (WSAENOTCONN).
+            let socket = std::sync::Arc::new(stream);
+            let stream = socket.try_clone()?;
+            (socket, stream)
+        };
+        #[cfg(not(windows))]
+        let (socket, mut stream) = (std::sync::Arc::new(stream.try_clone()?), stream);
         register(&socket)?;
         check()?;
         let stream = match proxy {
@@ -553,3 +561,7 @@ mod mtproxy_wire_tests;
 #[cfg(test)]
 #[path = "../tests/unit/proxy_config_tests.rs"]
 mod proxy_config_tests;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/unit/connect_cancel_tests.rs"]
+mod connect_cancel_tests;

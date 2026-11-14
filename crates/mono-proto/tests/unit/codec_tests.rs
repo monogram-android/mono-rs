@@ -88,7 +88,7 @@ fn generated_repetitions_validate_limits_before_allocation() {
     ));
 }
 
-#[cfg(feature = "layer-232")]
+#[cfg(feature = "layer-233")]
 #[test]
 fn generated_flags_reject_inconsistent_presence() {
     use crate::latest::api::InputMessagesFilterPhoneCallsConstructor;

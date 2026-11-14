@@ -273,6 +273,14 @@ pub fn refresh_file_source(
             mono_proto_messages::messages::sticker_rpc::get_sticker_set(
                 &mut state.snapshot, state.api_id, &mut state.media, set_id, access_hash,
             )?;
+        } else if indexed.kind == "gif" {
+            mono_proto_messages::extras_rpc::get_saved_gifs(
+                &mut state.snapshot, state.api_id, &mut state.media, 0,
+            )?;
+            if !state.media.get(&(chat_id, message_id)).is_some_and(|media|
+                matches!(media.refresh_source, Some(media::MediaRefreshSource::SavedGifs))) {
+                return Err(MtprotoError::Message("media refresh source unavailable".into()));
+            }
         } else {
             return Err(MtprotoError::Message("media refresh source unavailable".into()));
         }
@@ -516,7 +524,16 @@ pub fn download_message_media_range_checked(
             ))
         })?
     };
-    if expected_cache_key.is_some_and(|key| key != media.cache_key) {
+    if expected_cache_key.is_some_and(|key| {
+        if key == media.cache_key { return false; }
+        let base = match kind {
+            media::MediaDownloadKind::Thumb => key.strip_suffix(":thumb"),
+            media::MediaDownloadKind::Display => key.strip_suffix(":display")
+                .or_else(|| key.strip_prefix("avatar:").and_then(|_| key.strip_suffix(":small"))),
+            media::MediaDownloadKind::Full => None,
+        };
+        base != Some(media.cache_key.as_str())
+    }) {
         return Err(MtprotoError::Message("media identity changed".into()));
     }
     let dest = Path::new(&dest_path);

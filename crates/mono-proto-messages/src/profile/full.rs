@@ -234,7 +234,7 @@ pub(crate) fn fetch_user_full(
         info.profile_photo.as_ref().map(|p| p.as_ref()),
         info.personal_photo.as_ref().map(|p| p.as_ref()),
     );
-    let avatar_known = avatar_cache_key.is_some() || matches!(&user, User::User(user) if user.min.is_none() && user.photo.is_some());
+    let avatar_known = avatar_cache_key.is_some() || matches!(&user, User::User(user) if user.min.is_none());
     if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
     let (phone, is_bot, is_verified, is_scam, is_premium) = match &user {
         User::User(u) => (

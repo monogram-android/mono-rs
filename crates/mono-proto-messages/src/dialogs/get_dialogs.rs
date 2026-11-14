@@ -174,7 +174,7 @@ pub fn map_peer_dialogs(
             if u.verified.is_some() {
                 verified_ids.insert(chat_id);
             }
-            if u.min.is_none() && u.photo.as_deref().is_some_and(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_))) { known_photos.insert(chat_id); }
+            if u.min.is_none() { known_photos.insert(chat_id); }
             let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
             let (peer_status, peer_status_at) =
                 user_status_parts(u.status.as_ref().map(|s| s.as_ref()));

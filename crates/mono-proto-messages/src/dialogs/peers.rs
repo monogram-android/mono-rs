@@ -50,7 +50,7 @@ pub fn cache_from_users_chats(
                 u.min.is_some(),
             );
             if u.min.is_none()
-                && u.photo.as_deref().is_some_and(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_)))
+                && u.photo.as_deref().is_none_or(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_)))
             {
                 media_index.remove(&(chat_id, 0));
             }

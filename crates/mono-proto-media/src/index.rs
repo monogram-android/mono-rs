@@ -300,9 +300,13 @@ enum PersistClass {
     Message,
     ZeroDocument,
     Instant,
+    WebpageOwner,
 }
 
 fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
+    if key.1 > 0 && media.kind == "webpage_owner" && media.webpage_id.is_some() {
+        return PersistClass::WebpageOwner;
+    }
     // `(id, 0)` is also stickers, GIFs, inline files, and custom emoji.
     // Resolved static avatars use Photo/Inline locations too. Their exact
     // existing cache identity distinguishes them without changing stored types.
@@ -334,7 +338,7 @@ fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
 
 fn class_cap(class: PersistClass) -> Option<usize> {
     match class {
-        PersistClass::Avatar => None,
+        PersistClass::Avatar | PersistClass::WebpageOwner => None,
         PersistClass::Message => Some(MESSAGE_MEDIA_CAP),
         PersistClass::ZeroDocument => Some(ZERO_ID_DOCUMENT_CAP),
         PersistClass::Instant => Some(INSTANT_VIEW_CAP),
@@ -359,7 +363,16 @@ fn evict_overflow(index: &mut MediaIndex, class: PersistClass) {
     else {
         return;
     };
-    index.shift_remove(&oldest);
+    evict_media(index, oldest);
+}
+
+fn evict_media(index: &mut MediaIndex, key: (i64, i32)) {
+    // Keep the small ownership record so media eviction cannot consume a later webpage update.
+    if let Some(id) = index.get(&key).and_then(|media| media.webpage_id) {
+        index.insert(key, webpage_owner(id));
+    } else {
+        index.shift_remove(&key);
+    }
 }
 
 pub fn insert_media(index: &mut MediaIndex, key: (i64, i32), media: MediaRef) {
@@ -382,7 +395,7 @@ pub fn bound_media_index(index: &mut MediaIndex) {
     let mut drop_keys = crate::collections::HashSet::default();
     for (key, media) in index.iter().rev() {
         let (slot, cap) = match persist_class(key, media) {
-            PersistClass::Avatar => continue,
+            PersistClass::Avatar | PersistClass::WebpageOwner => continue,
             PersistClass::Message => (0, MESSAGE_MEDIA_CAP),
             PersistClass::ZeroDocument => (1, ZERO_ID_DOCUMENT_CAP),
             PersistClass::Instant => (2, INSTANT_VIEW_CAP),
@@ -393,8 +406,8 @@ pub fn bound_media_index(index: &mut MediaIndex) {
             kept[slot] += 1;
         }
     }
-    if !drop_keys.is_empty() {
-        index.retain(|key, _| !drop_keys.contains(key));
+    for key in drop_keys {
+        evict_media(index, key);
     }
 }
 
@@ -646,13 +659,17 @@ pub fn webpage_entry(page: &WebPage) -> Option<MediaRef> {
         WebPage::WebPageEmpty(page) => page.id,
         _ => return None,
     };
-    Some(MediaRef {
-        file_size: None, kind: "webpage_pending".into(), cache_key: format!("web:pending:{id}"),
+    Some(webpage_owner(id))
+}
+
+fn webpage_owner(id: i64) -> MediaRef {
+    MediaRef {
+        file_size: None, kind: "webpage_owner".into(), cache_key: format!("web:owner:{id}"),
         location: MediaLocation::Inline { bytes: Vec::new(), extension: "jpg".into() },
         thumb_cache_key: None, thumb_location: None, display_cache_key: None, display_location: None,
         sticker_set_id: None, sticker_set_access_hash: None, source_url: None,
         refresh_source: None, webpage_id: Some(id),
-    })
+    }
 }
 
 pub fn update_webpage(index: &mut MediaIndex, page: &WebPage, channel: Option<i64>) -> Vec<(i64, i32)> {

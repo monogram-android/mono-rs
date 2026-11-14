@@ -445,11 +445,24 @@ pub fn index_avatar(media: &mut MediaIndex, chat_id: i64, incoming: MediaRef) ->
     let key = (chat_id, 0);
     if let Some(existing) = media.get(&key)
         && is_resolved_video_avatar(existing)
-            && !is_resolved_video_avatar(&incoming)
-            && avatar_photo_id(existing) == avatar_photo_id(&incoming)
-        {
-            return existing.cache_key.clone();
+        && !is_resolved_video_avatar(&incoming)
+        && let Some(photo_id) = avatar_photo_id(existing)
+        && Some(photo_id) == avatar_photo_id(&incoming)
+    {
+        let cache_key = avatar_cache_key(chat_id, photo_id, true);
+        if existing.cache_key != cache_key {
+            let mut retained = existing.clone();
+            retained.cache_key = cache_key.clone();
+            retained.thumb_cache_key = retained
+                .thumb_cache_key
+                .map(|_| format!("{cache_key}:thumb"));
+            retained.display_cache_key = retained
+                .display_cache_key
+                .map(|_| format!("{cache_key}:small"));
+            insert_media(media, key, retained);
         }
+        return cache_key;
+    }
     let cache_key = incoming.cache_key.clone();
     insert_media(media, key, incoming);
     cache_key

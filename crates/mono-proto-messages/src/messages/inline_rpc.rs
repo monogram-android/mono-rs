@@ -114,7 +114,22 @@ pub fn get_inline_bot_results(
         vector_boxed_items(&body.users).cloned(),
         std::iter::empty::<TlChat>(),
     );
-    Ok(results_from_body(&body, media))
+    let result = results_from_body(&body, media);
+    let source = media::MediaRefreshSource::InlineBot {
+        chat_id, bot_id, query: query.to_string(), offset: offset.to_string(),
+    };
+    for item in vector_boxed_items(&body.results) {
+        let BotInlineResult::BotInlineMediaResult(item) = item else { continue };
+        let id = match (item.document.as_deref(), item.photo.as_deref()) {
+            (Some(Document::Document(doc)), _) => Some(doc.id),
+            (_, Some(Photo::Photo(photo))) => Some(photo.id),
+            _ => None,
+        };
+        if let Some(indexed) = id.and_then(|id| media.get_mut(&(id, 0))) {
+            indexed.refresh_source = Some(source.clone());
+        }
+    }
+    Ok(result)
 }
 
 pub fn send_inline_bot_result(

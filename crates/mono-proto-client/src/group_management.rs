@@ -450,6 +450,7 @@ pub fn set_forum_enabled(
                     channel: Box::new(channel),
                     enabled: boolean(enabled),
                     tabs: boolean(tabs),
+                    sidebar: boolean(false),
                 },
             )?;
             enqueue_response(state.snapshot.dc_id, &response)?;

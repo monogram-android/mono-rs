@@ -234,6 +234,8 @@ pub(crate) fn fetch_user_full(
         info.profile_photo.as_ref().map(|p| p.as_ref()),
         info.personal_photo.as_ref().map(|p| p.as_ref()),
     );
+    let avatar_known = avatar_cache_key.is_some() || matches!(&user, User::User(user) if user.min.is_none() && user.photo.is_some());
+    if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
     let (phone, is_bot, is_verified, is_scam, is_premium) = match &user {
         User::User(u) => (
             u.phone.clone().filter(|s| !s.is_empty()),
@@ -256,6 +258,7 @@ pub(crate) fn fetch_user_full(
         username,
         about: info.about,
         avatar_cache_key,
+        avatar_known,
         is_self,
         status,
         status_at,
@@ -299,12 +302,14 @@ pub(crate) fn fetch_basic_chat(
     let peer_id = chat_id_for_chat(chat_id);
     let mut title = format!("Chat {chat_id}");
     let mut avatar_cache_key = None;
+    let mut avatar_known = false;
     let mut members_count = None;
     for chat in vector_boxed_items(&full.chats) {
         match chat {
             TlChat::Chat(c) if c.id == chat_id => {
                 title = c.title.clone();
                 members_count = Some(c.participants_count);
+                avatar_known = true;
                 avatar_cache_key =
                     index_chat_photo(media_index, peer_id, PeerKind::Chat, c.id, 0, &c.photo);
                 break;
@@ -318,6 +323,8 @@ pub(crate) fn fetch_basic_chat(
     }
     avatar_cache_key =
         index_full_chat_photo(media_index, peer_id, &full.full_chat).or(avatar_cache_key);
+    avatar_known |= avatar_cache_key.is_some();
+    if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
     Ok(ProfileDto {
         id: peer_id,
         kind: "chat".into(),
@@ -325,6 +332,7 @@ pub(crate) fn fetch_basic_chat(
         username: None,
         about,
         avatar_cache_key,
+        avatar_known,
         is_self: false,
         status: None,
         status_at: None,
@@ -389,6 +397,7 @@ pub(crate) fn fetch_channel(
     let mut title = format!("Channel {}", cached.id);
     let mut username = None;
     let mut avatar_cache_key = None;
+    let mut avatar_known = false;
     let mut kind = "channel".to_string();
     let mut verified = false;
     let mut scam = false;
@@ -398,6 +407,7 @@ pub(crate) fn fetch_channel(
             TlChat::Channel(c) if c.id == cached.id => {
                 title = c.title.clone();
                 username = first_username(&c.username, &c.usernames);
+                avatar_known = c.min.is_none();
                 emoji_status =
                     emoji_status_document_id(c.emoji_status.as_ref().map(|s| s.as_ref()));
                 if c.megagroup.is_some() {
@@ -424,6 +434,8 @@ pub(crate) fn fetch_channel(
     }
     avatar_cache_key =
         index_full_chat_photo(media_index, peer_id, &full.full_chat).or(avatar_cache_key);
+    avatar_known |= avatar_cache_key.is_some();
+    if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
     // Broadcast channels expose the subscriber list only when the server allows it;
     // megagroups are attempted anyway and hidden on failure.
     let participants_visible = if kind == "channel" {
@@ -438,6 +450,7 @@ pub(crate) fn fetch_channel(
         username,
         about,
         avatar_cache_key,
+        avatar_known,
         is_self: false,
         status: None,
         status_at: None,

@@ -51,7 +51,8 @@ pub fn get_saved_gifs(
                 let Document::Document(d) = doc else {
                     continue;
                 };
-                let media = media::media_ref_from_document(d);
+                let mut media = media::media_ref_from_document(d);
+                media.refresh_source = Some(media::MediaRefreshSource::SavedGifs);
                 let dto = SavedGifDto {
                     document_id: d.id,
                     cache_key: media.cache_key.clone(),

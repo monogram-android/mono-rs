@@ -89,7 +89,7 @@ pub fn fixture(count: usize) -> ClientSession {
                 display_location: None,
                 sticker_set_id: None,
                 sticker_set_access_hash: None,
-                source_url: None,
+                source_url: None, refresh_source: None, webpage_id: None,
             },
         );
     }

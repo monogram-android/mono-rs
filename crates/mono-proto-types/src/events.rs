@@ -50,6 +50,10 @@ pub enum UpdateEventDto {
     NewMessage {
         message: MessageDto,
     },
+    MessageContentInvalidated {
+        chat_id: i64,
+        message_id: i32,
+    },
     MessageEdited {
         message: MessageDto,
     },

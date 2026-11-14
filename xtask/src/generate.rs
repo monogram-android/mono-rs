@@ -17,7 +17,7 @@ struct Layer {
     sha256: String,
 }
 
-pub(super) fn run(check: bool) -> Result<(), String> {
+pub(super) fn run(check: bool, selected_layer: Option<u32>) -> Result<(), String> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let manifest_path = root.join("schemas/manifest.json");
     let manifest: Manifest =
@@ -28,7 +28,11 @@ pub(super) fn run(check: bool) -> Result<(), String> {
         .build()
         .map_err(|error| error.to_string())?;
 
-    for layer in &manifest.layers {
+    if let Some(layer) = selected_layer
+        && !manifest.layers.iter().any(|entry| entry.layer == layer) {
+        return Err(format!("layer {layer} is not pinned in the schema manifest"));
+    }
+    for layer in manifest.layers.iter().filter(|entry| selected_layer.is_none_or(|layer| entry.layer == layer)) {
         let bytes = download(&client, layer)?;
         let schema = parse(
             std::str::from_utf8(&bytes)

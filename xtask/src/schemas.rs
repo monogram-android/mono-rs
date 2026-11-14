@@ -25,7 +25,7 @@ pub(super) fn verify() -> Result<(), String> {
         .build()
         .map_err(|error| error.to_string())?;
 
-    let expected = [223, 229, 230, 231, 232];
+    let expected = [223, 229, 230, 231, 232, 233];
     let actual = manifest
         .layers
         .iter()

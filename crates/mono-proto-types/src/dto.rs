@@ -29,6 +29,7 @@ pub struct ProfileDto {
     pub username: Option<String>,
     pub about: Option<String>,
     pub avatar_cache_key: Option<String>,
+    pub avatar_known: bool,
     pub is_self: bool,
     pub status: Option<String>,
     pub status_at: Option<i64>,

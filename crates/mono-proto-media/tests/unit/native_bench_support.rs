@@ -34,7 +34,7 @@ pub fn fixture() -> (HashMap<i64, CachedPeer>, Index, usize) {
             thumb_cache_key: Some(format!("avatar:{id}:thumb")),
             thumb_location: Some(MediaLocation::Inline { bytes: payload, extension: "jpg".into() }),
             display_cache_key: None, display_location: None, sticker_set_id: None,
-            sticker_set_access_hash: None, source_url: None,
+            sticker_set_access_hash: None, source_url: None, refresh_source: None, webpage_id: None,
         });
         if n % 4 == 0 { bytes += len; }
     }

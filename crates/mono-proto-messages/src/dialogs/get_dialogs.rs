@@ -164,6 +164,7 @@ pub fn map_peer_dialogs(
     > = HashMap::new();
     let mut poll_peers: HashSet<i64> = HashSet::new();
     let mut verified_ids: HashSet<i64> = HashSet::new();
+    let mut known_photos: HashSet<i64> = HashSet::new();
     for user in &user_list {
         if let User::User(u) = user {
             let chat_id = chat_id_for_user(u.id);
@@ -173,23 +174,8 @@ pub fn map_peer_dialogs(
             if u.verified.is_some() {
                 verified_ids.insert(chat_id);
             }
-            let photo_key = u.photo.as_ref().and_then(|photo| {
-                let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref() else {
-                    return None;
-                };
-                let hash = u.access_hash.filter(|&h| h != 0)?;
-                Some(index_dialog_avatar(
-                    media_index,
-                    chat_id,
-                    PeerKind::User,
-                    u.id,
-                    hash,
-                    p.photo_id,
-                    p.dc_id,
-                    p.has_video.is_some(),
-                    p.stripped_thumb.as_deref(),
-                ))
-            });
+            if u.min.is_none() && u.photo.as_deref().is_some_and(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_))) { known_photos.insert(chat_id); }
+            let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
             let (peer_status, peer_status_at) =
                 user_status_parts(u.status.as_ref().map(|s| s.as_ref()));
             extras.insert(
@@ -217,20 +203,8 @@ pub fn map_peer_dialogs(
         match chat {
             TlChat::Chat(c) => {
                 let chat_id = chat_id_for_chat(c.id);
-                let photo_key = match &*c.photo {
-                    ChatPhoto::ChatPhoto(p) => Some(index_dialog_avatar(
-                        media_index,
-                        chat_id,
-                        PeerKind::Chat,
-                        c.id,
-                        0,
-                        p.photo_id,
-                        p.dc_id,
-                        p.has_video.is_some(),
-                        p.stripped_thumb.as_deref(),
-                    )),
-                    _ => None,
-                };
+                known_photos.insert(chat_id);
+                let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
                 extras.insert(chat_id, (false, false, photo_key, None, None, None));
             }
             TlChat::Channel(c) => {
@@ -238,22 +212,8 @@ pub fn map_peer_dialogs(
                 if c.verified.is_some() {
                     verified_ids.insert(chat_id);
                 }
-                let photo_key = match &*c.photo {
-                    ChatPhoto::ChatPhoto(p) => c.access_hash.filter(|&h| h != 0).map(|hash| {
-                        index_dialog_avatar(
-                            media_index,
-                            chat_id,
-                            PeerKind::Channel,
-                            c.id,
-                            hash,
-                            p.photo_id,
-                            p.dc_id,
-                            p.has_video.is_some(),
-                            p.stripped_thumb.as_deref(),
-                        )
-                    }),
-                    _ => None,
-                };
+                if c.min.is_none() && matches!(c.photo.as_ref(), ChatPhoto::ChatPhotoEmpty(_)) { known_photos.insert(chat_id); }
+                let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
                 extras.insert(
                     chat_id,
                     (
@@ -353,6 +313,7 @@ pub fn map_peer_dialogs(
             is_contact,
             is_bot,
             is_verified: verified_ids.contains(&chat_id),
+            photo_known: photo_cache_key.is_some() || known_photos.contains(&chat_id),
             photo_cache_key,
             pinned: d.pinned.is_some(),
             read_inbox_max_id: d.read_inbox_max_id,

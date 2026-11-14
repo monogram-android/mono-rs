@@ -186,7 +186,7 @@ pub fn media_ref_from_photo(photo: &Photo, cache_key: String) -> Option<MediaRef
                 display_location: None,
                 sticker_set_id: None,
                 sticker_set_access_hash: None,
-                source_url: None,
+                source_url: None, refresh_source: None, webpage_id: None,
             });
         }
     }
@@ -217,7 +217,7 @@ pub fn media_ref_from_photo(photo: &Photo, cache_key: String) -> Option<MediaRef
         display_location: None,
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None,
+        source_url: None, refresh_source: None, webpage_id: None,
     })
 }
 
@@ -250,7 +250,7 @@ pub fn media_ref_from_photo_with_thumbs(photo: &Photo, cache_key: String) -> Opt
         display_location: None,
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None,
+        source_url: None, refresh_source: None, webpage_id: None,
     })
 }
 
@@ -511,7 +511,7 @@ pub fn media_ref_peer_photo(
         display_location: Some(small_location),
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None,
+        source_url: None, refresh_source: None, webpage_id: None,
         location: MediaLocation::PeerPhoto {
             peer_kind,
             peer_id,
@@ -569,7 +569,11 @@ pub fn document_file_location(
 pub fn webpage_media(
     media: &mono_proto::latest::api::MessageMediaWebPageConstructor,
 ) -> Option<(MediaRef, MediaMetrics)> {
-    let WebPage::WebPage(page) = media.webpage.as_ref() else {
+    webpage_content(&media.webpage)
+}
+
+pub fn webpage_content(webpage: &WebPage) -> Option<(MediaRef, MediaMetrics)> {
+    let WebPage::WebPage(page) = webpage else {
         return None;
     };
     let meta = serde_json::json!({
@@ -596,6 +600,7 @@ pub fn webpage_media(
             let cache_key = format!("photo:{}", ph.id);
             if let Some(mut indexed) = media_ref_from_photo_with_thumbs(photo.as_ref(), cache_key) {
                 indexed.kind = "webpage".into();
+                indexed.webpage_id = Some(page.id);
                 let sizes: Vec<PhotoSize> = vector_boxed_items(&ph.sizes).cloned().collect();
                 let full_ty = match &indexed.location {
                     MediaLocation::Photo { thumb_size, .. } => thumb_size.clone(),
@@ -628,10 +633,35 @@ pub fn webpage_media(
             display_location: None,
             sticker_set_id: None,
             sticker_set_access_hash: None,
-            source_url: None,
+            source_url: None, refresh_source: None, webpage_id: Some(page.id),
         },
         metrics,
     ))
+}
+
+pub fn webpage_entry(page: &WebPage) -> Option<MediaRef> {
+    if let Some((media, _)) = webpage_content(page) { return Some(media); }
+    let id = match page {
+        WebPage::WebPagePending(page) => page.id,
+        WebPage::WebPageEmpty(page) => page.id,
+        _ => return None,
+    };
+    Some(MediaRef {
+        file_size: None, kind: "webpage_pending".into(), cache_key: format!("web:pending:{id}"),
+        location: MediaLocation::Inline { bytes: Vec::new(), extension: "jpg".into() },
+        thumb_cache_key: None, thumb_location: None, display_cache_key: None, display_location: None,
+        sticker_set_id: None, sticker_set_access_hash: None, source_url: None,
+        refresh_source: None, webpage_id: Some(id),
+    })
+}
+
+pub fn update_webpage(index: &mut MediaIndex, page: &WebPage, channel: Option<i64>) -> Vec<(i64, i32)> {
+    let Some(updated) = webpage_entry(page) else { return Vec::new() };
+    let owners: Vec<_> = index.iter().filter_map(|(key, media)| {
+        (key.1 > 0 && media.webpage_id == updated.webpage_id && channel.is_none_or(|chat| chat == key.0)).then_some(*key)
+    }).collect();
+    for owner in &owners { insert_media(index, *owner, updated.clone()); }
+    owners
 }
 
 pub fn extract_from_media(media: &MessageMedia) -> Option<(MediaRef, MediaMetrics)> {
@@ -675,7 +705,7 @@ pub fn extract_from_media(media: &MessageMedia) -> Option<(MediaRef, MediaMetric
                     display_location,
                     sticker_set_id: None,
                     sticker_set_access_hash: None,
-                    source_url: None,
+                    source_url: None, refresh_source: None, webpage_id: None,
                 },
                 metrics,
             ))
@@ -751,7 +781,7 @@ pub fn extract_from_media(media: &MessageMedia) -> Option<(MediaRef, MediaMetric
                     display_location,
                     sticker_set_id,
                     sticker_set_access_hash,
-                    source_url: None,
+                    source_url: None, refresh_source: None, webpage_id: None,
                 },
                 metrics,
             ))
@@ -819,7 +849,11 @@ pub fn index_message_media(msg: &Message, index: &mut MediaIndex) -> IndexedMess
             _ => IndexedMessageMedia::default(),
         };
     };
-    if matches!(media.as_ref(), MessageMedia::MessageMediaUnsupported(_)) {
+    if let MessageMedia::MessageMediaWebPage(page) = media.as_ref()
+        && let Some(entry) = webpage_entry(&page.webpage) {
+            insert_media(index, (chat_id, m.id), entry);
+        }
+    if matches!(media.as_ref(), MessageMedia::MessageMediaUnsupported(_) | MessageMedia::MessageMediaWidget(_)) {
         return IndexedMessageMedia {
             kind: Some("unsupported".into()),
             ..IndexedMessageMedia::default()
@@ -1027,7 +1061,9 @@ pub fn fetch_custom_emoji(
     let Document::Document(doc) = first else {
         return Err(MtprotoError::Message("custom emoji document empty".into()));
     };
-    Ok(media_ref_from_document(doc))
+    let mut media = media_ref_from_document(doc);
+    media.refresh_source = Some(crate::media_location::MediaRefreshSource::CustomEmoji);
+    Ok(media)
 }
 
 pub fn media_ref_from_document(doc: &mono_proto::latest::api::DocumentConstructor) -> MediaRef {
@@ -1049,7 +1085,7 @@ pub fn media_ref_from_document(doc: &mono_proto::latest::api::DocumentConstructo
         display_location: None,
         sticker_set_id,
         sticker_set_access_hash,
-        source_url: None,
+        source_url: None, refresh_source: None, webpage_id: None,
     };
     attach_document_thumbs(doc, &mut media);
     media

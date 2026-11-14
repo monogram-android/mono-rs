@@ -417,13 +417,29 @@ pub fn collect_other_updates<'a>(
                     events.push(UpdateEventDto::MessageEdited { message: dto });
                 }
             }
+            Update::UpdateWebPage(update) => {
+                for (chat_id, message_id) in crate::media::update_webpage(media_index, &update.webpage, None) {
+                    events.push(UpdateEventDto::MessageContentInvalidated { chat_id, message_id });
+                }
+            }
+            Update::UpdateChannelWebPage(update) => {
+                for (chat_id, message_id) in crate::media::update_webpage(media_index, &update.webpage, Some(chat_id_for_channel(update.channel_id))) {
+                    events.push(UpdateEventDto::MessageContentInvalidated { chat_id, message_id });
+                }
+            }
             Update::UpdateDeleteMessages(u) => {
+                let ids = vector_items(&u.messages);
+                media_index.retain(|(chat_id, message_id), _| *message_id <= 0 ||
+                    crate::peers::is_channel_chat_id(*chat_id) || !ids.contains(message_id));
                 events.push(UpdateEventDto::MessagesDeleted {
                     chat_id: None,
                     message_ids: vector_items(&u.messages).to_vec(),
                 });
             }
             Update::UpdateDeleteChannelMessages(u) => {
+                for id in vector_items(&u.messages) {
+                    media_index.shift_remove(&(chat_id_for_channel(u.channel_id), *id));
+                }
                 events.push(UpdateEventDto::MessagesDeleted {
                     chat_id: Some(chat_id_for_channel(u.channel_id)),
                     message_ids: vector_items(&u.messages).to_vec(),

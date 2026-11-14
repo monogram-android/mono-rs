@@ -11,7 +11,7 @@ use mono_proto::latest::api::{
 use crate::MtprotoError;
 use crate::media_thumbs::is_getfile_thumb_size;
 
-pub use crate::media_types::{MediaLocation, MediaRef};
+pub use crate::media_types::{MediaLocation, MediaRef, MediaRefreshSource};
 
 // Zero and -1 are reserved for avatars and Instant View; queue media uses the remaining negatives.
 pub fn scheduled_media_id(id: i32) -> Result<i32, MtprotoError> {

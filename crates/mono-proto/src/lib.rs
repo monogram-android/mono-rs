@@ -20,10 +20,10 @@ pub use codec::{
 pub mod transport;
 
 /// API layers materialized in this build of the generated crate.
-pub const GENERATED_API_LAYERS: &[u32] = &[223, 229, 230, 231, 232];
+pub const GENERATED_API_LAYERS: &[u32] = &[223, 229, 230, 231, 232, 233];
 
 /// Current officially published API layer.
-pub const LATEST_API_LAYER: u32 = 232;
+pub const LATEST_API_LAYER: u32 = 233;
 
 /// Telegram API schema layer 223.
 #[cfg(feature = "layer-223")]
@@ -70,9 +70,18 @@ pub mod layer_232 {
     pub mod api;
 }
 
+/// Telegram API schema layer 233.
+#[cfg(feature = "layer-233")]
+pub mod layer_233 {
+    /// Public Telegram API constructors and methods.
+    #[rustfmt::skip]
+    #[allow(missing_docs, clippy::all, clippy::pedantic)]
+    pub mod api;
+}
+
 /// The current officially published API layer.
-#[cfg(feature = "layer-232")]
-pub use layer_232 as latest;
+#[cfg(feature = "layer-233")]
+pub use layer_233 as latest;
 
 /// Independently versioned end-to-end payloads for Secret Chats.
 #[cfg(feature = "secret-chat")]

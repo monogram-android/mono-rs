@@ -114,6 +114,12 @@ pub fn index_map_previews<'a>(
     }
 }
 
+pub(super) fn map_identity(lat: f64, lng: f64, access_hash: i64, zoom: i32, w: i32, h: i32) -> (i64, String) {
+    let key = format!("geo:v2:{:016x}:{:016x}:{access_hash}:{zoom}:{}:{}:1", lat.to_bits(), lng.to_bits(), w.clamp(64, 1024), h.clamp(64, 1024));
+    let hash = key.bytes().fold(0xcbf29ce484222325u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
+    ((hash | (1u64 << 63)) as i64, key)
+}
+
 pub fn index_one_map(
     snapshot: &mut Snapshot,
     api_id: i32,
@@ -124,7 +130,7 @@ pub fn index_one_map(
     let GeoPoint::GeoPoint(geo) = block.geo.as_ref() else {
         return Ok(());
     };
-    let cache_key = format!("geo:{}:{}", geo.access_hash, block.zoom);
+    let (media_id, cache_key) = map_identity(geo.lat, geo.long, geo.access_hash, block.zoom, block.w, block.h);
     let location = InputWebFileLocation::InputWebFileGeoPointLocation(
         InputWebFileGeoPointLocationConstructor {
             geo_point: Box::new(InputGeoPoint::InputGeoPoint(InputGeoPointConstructor {
@@ -152,7 +158,7 @@ pub fn index_one_map(
     let UploadWebFile::UploadWebFile(file) = response;
     media::insert_media(
         media,
-        (geo.access_hash, INSTANT_VIEW_MEDIA_MSG),
+        (media_id, INSTANT_VIEW_MEDIA_MSG),
         MediaRef {
             file_size: None,
             kind: "photo".into(),
@@ -167,6 +173,8 @@ pub fn index_one_map(
             display_location: None,
             sticker_set_id: None,
             sticker_set_access_hash: None,
+            refresh_source: None,
+            webpage_id: None,
             source_url: if page_url.is_empty() {
                 None
             } else {

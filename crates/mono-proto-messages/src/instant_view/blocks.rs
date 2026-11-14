@@ -420,6 +420,7 @@ pub fn map_geo(geo: &GeoPoint, zoom: i32, w: i32, h: i32, caption: &PageCaption)
         GeoPoint::GeoPoint(g) => (g.lat, g.long, g.access_hash),
         _ => (0.0, 0.0, 0),
     };
+    let (media_id, cache_key) = super::index::map_identity(lat, lng, access_hash, zoom, w, h);
     json!({
         "k": "map",
         "lat": lat,
@@ -427,8 +428,8 @@ pub fn map_geo(geo: &GeoPoint, zoom: i32, w: i32, h: i32, caption: &PageCaption)
         "zoom": zoom,
         "w": w,
         "h": h,
-        "cache": format!("geo:{access_hash}:{zoom}"),
-        "hash": access_hash,
+        "cache": cache_key,
+        "hash": media_id,
         "caption": caption_json(caption),
     })
 }

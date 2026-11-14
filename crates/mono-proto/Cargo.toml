@@ -1,6 +1,6 @@
 [package]
 name = "mono-proto"
-version = "0.2.0+layer.232"
+version = "0.2.0+layer.233"
 edition = "2024"
 license = "GPL-3.0-only"
 rust-version.workspace = true
@@ -8,7 +8,7 @@ description = "Generated Telegram MTProto type declarations"
 publish = false
 
 [features]
-default = ["layer-232"]
+default = ["layer-233"]
 serde = ["dep:serde", "bnum/serde"]
 bon = ["dep:bon"]
 layer-223 = []
@@ -16,8 +16,9 @@ layer-229 = []
 layer-230 = []
 layer-231 = []
 layer-232 = []
-all-layers = ["layer-223", "layer-229", "layer-230", "layer-231", "layer-232"]
-secret-chat = ["layer-232"]
+layer-233 = []
+all-layers = ["layer-223", "layer-229", "layer-230", "layer-231", "layer-232", "layer-233"]
+secret-chat = ["layer-233"]
 tracing = ["mono-proto-codec/tracing"]
 dangerous-unredacted-logging = ["tracing", "mono-proto-codec/dangerous-unredacted-logging"]
 

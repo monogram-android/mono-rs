@@ -32,6 +32,13 @@ pub enum MediaLocation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum MediaRefreshSource {
+    InlineBot { chat_id: i64, bot_id: i64, query: String, offset: String },
+    SavedGifs,
+    CustomEmoji,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaRef {
     #[serde(default)]
     pub file_size: Option<i64>,
@@ -52,4 +59,8 @@ pub struct MediaRef {
     pub sticker_set_access_hash: Option<i64>,
     #[serde(default)]
     pub source_url: Option<String>,
+    #[serde(default)]
+    pub refresh_source: Option<MediaRefreshSource>,
+    #[serde(default)]
+    pub webpage_id: Option<i64>,
 }

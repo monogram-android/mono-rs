@@ -60,7 +60,7 @@ fn parts_outside_the_seek_window_are_cancelled_and_cdn_stays_on_origin() {
         display_location: None,
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None,
+        source_url: None, refresh_source: None, webpage_id: None,
     };
     let path = std::env::temp_dir().join(format!("mono-proto-seek-cdn-{}", std::process::id()));
     let mut cdn_flags = Vec::new();

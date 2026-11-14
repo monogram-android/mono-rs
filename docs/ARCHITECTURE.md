@@ -488,11 +488,11 @@ A TL layer is a frozen snapshot of constructor and method IDs, field layouts and
 
 ### Pinned layer
 
-This checkout is pinned to layer 232:
+This checkout is pinned to layer 233:
 
-- `mono-proto` is `0.2.0+layer.232`.
-- The default Cargo feature is `layer-232`, and `LATEST_API_LAYER` is 232.
-- Generated modules for `layer-223`, `layer-229`, `layer-230`, `layer-231` and `layer-232` exist side by side.
+- `mono-proto` is `0.2.0+layer.233`.
+- The default Cargo feature is `layer-233`, and `LATEST_API_LAYER` is 233.
+- Generated modules for `layer-223`, `layer-229`, `layer-230`, `layer-231`, `layer-232` and `layer-233` exist side by side.
 - A platform adapter's `libraryVersion()` can report its adapter version and the selected runtime layer. The library layer is always available as `mono-proto::LATEST_API_LAYER`.
 
 The runtime decodes and encodes with the generated constructor IDs of the selected layer, and `api_invoke` wraps the first request on a fresh socket in `invokeWithLayer(initConnection(...))`.
@@ -503,11 +503,11 @@ Older layers stay for comparison, migration and generator tests. The layer is ch
 
 [schema.jppgr.am](https://schema.jppgr.am/) archives TL layers. It's useful for diagnosing wire mismatches and planning a bump: search constructors, methods and types, diff layers, look up errors and decode payloads.
 
-- Raw pinned layer: [layers/232.tl](https://schema.jppgr.am/layers/232.tl)
-- Layer 231 to 232 diff: [diff/231-232](https://schema.jppgr.am/diff/231-232)
+- Raw pinned layer: [layers/233.tl](https://schema.jppgr.am/layers/233.tl)
+- Layer 232 to 233 diff: [diff/232-233](https://schema.jppgr.am/diff/232-233)
 - Changelog feed: [api/feed](https://schema.jppgr.am/api/feed)
 
-It archives layers newer than this checkout. A constructor found there isn't usable until the schema is regenerated, so check the ID in `layers/232.tl` first.
+It archives layers newer than this checkout. A constructor found there isn't usable until the schema is regenerated, so check the ID in `layers/233.tl` first.
 
 ### Upgrading a layer
 
@@ -605,8 +605,8 @@ Telegram pages this document relies on. The full list lives in [USAGE: Telegram 
 | Invoking              | [https://core.telegram.org/api/invoking](https://core.telegram.org/api/invoking)                                         |
 | Layers                | [https://core.telegram.org/api/layers](https://core.telegram.org/api/layers)                                             |
 | TL schema explorer    | [https://schema.jppgr.am/](https://schema.jppgr.am/)                                                                     |
-| Pinned layer 232      | [https://schema.jppgr.am/layers/232.tl](https://schema.jppgr.am/layers/232.tl)                                           |
-| Layer 231 to 232 diff | [https://schema.jppgr.am/diff/231-232](https://schema.jppgr.am/diff/231-232)                                             |
+| Pinned layer 233      | [https://schema.jppgr.am/layers/233.tl](https://schema.jppgr.am/layers/233.tl)                                           |
+| Layer 232 to 233 diff | [https://schema.jppgr.am/diff/232-233](https://schema.jppgr.am/diff/232-233)                                             |
 | Layer changelog feed  | [https://schema.jppgr.am/api/feed](https://schema.jppgr.am/api/feed)                                                     |
 | Updates               | [https://core.telegram.org/api/updates](https://core.telegram.org/api/updates)                                           |
 | Files                 | [https://core.telegram.org/api/files](https://core.telegram.org/api/files)                                               |

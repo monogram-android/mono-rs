@@ -237,55 +237,44 @@ pub fn refresh_file_source(
             reindex_peer_avatar(state, chat_id);
             return Ok(());
         }
-        let peer_photo = state
-            .media
-            .get(&(chat_id, message_id))
-            .is_some_and(|media| matches!(media.location, media::MediaLocation::PeerPhoto { .. }));
+        let indexed = state.media.get(&(chat_id, message_id)).cloned().unwrap();
+        let peer_photo = matches!(indexed.location, media::MediaLocation::PeerPhoto { .. })
+            || indexed.cache_key.starts_with(&format!("avatar:{chat_id}:"))
+            || indexed.cache_key == format!("avatar:{chat_id}");
         if peer_photo {
             let _ = refresh_dialogs(state);
-            let _ = mono_proto_messages::profile::get_profile(
-                &mut state.snapshot,
-                state.api_id,
-                &state.peers,
-                &mut state.media,
-                state.user_id,
-                chat_id,
-            );
+            mono_proto_messages::profile::get_profile(
+                &mut state.snapshot, state.api_id, &state.peers,
+                &mut state.media, state.user_id, chat_id,
+            )?;
             media::fill_zero_peer_photo_hash(&mut state.media, &state.peers, chat_id, message_id);
-        } else if state
-            .media
-            .get(&(chat_id, message_id))
-            .is_some_and(|media| matches!(media.location, media::MediaLocation::Document { .. }))
-        {
-            let sticker = state
-                .media
-                .get(&(chat_id, message_id))
-                .and_then(sticker_set_of);
-            if let Some((set_id, access_hash)) = sticker {
-                // Pack stickers have no message id. messages.getStickerSet is the
-                // constructor that reissues their file_reference.
-                // https://core.telegram.org/api/file-references
-                let _ = mono_proto_messages::messages::sticker_rpc::get_sticker_set(
-                    &mut state.snapshot,
-                    state.api_id,
-                    &mut state.media,
-                    set_id,
-                    access_hash,
-                );
-            } else {
-                let _ = mono_proto_messages::extras_rpc::get_saved_gifs(
-                    &mut state.snapshot,
-                    state.api_id,
-                    &mut state.media,
-                    0,
-                );
+        } else if let Some(source) = indexed.refresh_source {
+            match source {
+                media::MediaRefreshSource::InlineBot { chat_id, bot_id, query, offset } => {
+                    mono_proto_messages::messages::inline_rpc::get_inline_bot_results(
+                        &mut state.snapshot, state.api_id, &mut state.peers, &mut state.media,
+                        chat_id, bot_id, &query, &offset,
+                    )?;
+                }
+                media::MediaRefreshSource::SavedGifs => {
+                    mono_proto_messages::extras_rpc::get_saved_gifs(
+                        &mut state.snapshot, state.api_id, &mut state.media, 0,
+                    )?;
+                }
+                media::MediaRefreshSource::CustomEmoji => {
+                    let media::MediaLocation::Document { id, .. } = indexed.location else {
+                        return Err(MtprotoError::Message("invalid emoji source".into()));
+                    };
+                    let refreshed = media::fetch_custom_emoji(&mut state.snapshot, state.api_id, id)?;
+                    media::insert_media(&mut state.media, (chat_id, message_id), refreshed);
+                }
             }
-        } else if state
-            .media
-            .get(&(chat_id, message_id))
-            .is_some_and(|media| matches!(media.location, media::MediaLocation::Photo { .. }))
-        {
-            refresh_last_inline(state);
+        } else if let Some((set_id, access_hash)) = sticker_set_of(&indexed) {
+            mono_proto_messages::messages::sticker_rpc::get_sticker_set(
+                &mut state.snapshot, state.api_id, &mut state.media, set_id, access_hash,
+            )?;
+        } else {
+            return Err(MtprotoError::Message("media refresh source unavailable".into()));
         }
         return Ok(());
     }

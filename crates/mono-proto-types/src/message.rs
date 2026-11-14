@@ -16,6 +16,8 @@ pub struct ChatDto {
     pub is_bot: bool,
     pub is_verified: bool,
     pub photo_cache_key: Option<String>,
+    #[serde(default)]
+    pub photo_known: bool,
     pub pinned: bool,
     pub read_inbox_max_id: i32,
     pub read_outbox_max_id: i32,

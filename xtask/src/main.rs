@@ -103,6 +103,7 @@ fn test_layers() -> Result<(), String> {
         "layer-230",
         "layer-231",
         "layer-232",
+        "layer-233",
     ] {
         run(
             "cargo",
@@ -144,8 +145,14 @@ fn ci() -> Result<(), String> {
 
 fn help() {
     eprintln!(
-        "Usage: cargo xtask <ci|package|test-layers|verify-schemas|generate-schemas|check-schemas>"
+        "Usage: cargo xtask <ci|package|test-layers|verify-schemas|generate-schemas [layer]|check-schemas [layer]>"
     );
+}
+
+fn schema_command(check: bool) -> Result<(), String> {
+    let layer = env::args().nth(2).map(|value| value.parse::<u32>()
+        .map_err(|_| format!("invalid layer: {value}"))).transpose()?;
+    generate::run(check, layer)
 }
 
 fn main() -> ExitCode {
@@ -154,8 +161,8 @@ fn main() -> ExitCode {
         Some("package") => package(),
         Some("test-layers") => test_layers(),
         Some("verify-schemas") => schemas::verify(),
-        Some("generate-schemas") => generate::run(false),
-        Some("check-schemas") => generate::run(true),
+        Some("generate-schemas") => schema_command(false),
+        Some("check-schemas") => schema_command(true),
         Some("help" | "-h" | "--help") => {
             help();
             return ExitCode::SUCCESS;

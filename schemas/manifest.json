@@ -25,6 +25,11 @@
       "layer": 232,
       "url": "https://schema.jppgr.am/layers/232.tl",
       "sha256": "7a1f11881d1e0f021af61c97464fec1e5d88edf9f4920950fe68e0c31c0f9947"
+    },
+    {
+      "layer": 233,
+      "url": "https://schema.jppgr.am/layers/233.tl",
+      "sha256": "980e66fb74d1f36b1225e72f2f209abdb7e54a2eeb7f72ac3646af1e3b6cabf2"
     }
   ]
 }

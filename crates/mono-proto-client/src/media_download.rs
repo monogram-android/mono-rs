@@ -251,7 +251,7 @@ pub fn refresh_file_source(
                 state.user_id,
                 chat_id,
             );
-            media::fill_zero_peer_photo_hashes(&mut state.media, &state.peers);
+            media::fill_zero_peer_photo_hash(&mut state.media, &state.peers, chat_id, message_id);
         } else if state
             .media
             .get(&(chat_id, message_id))
@@ -328,9 +328,10 @@ pub fn refresh_last_inline(state: &mut ClientState) {
         &query.offset,
     )
     .is_ok()
-        && let Some(stored) = state.last_inline.as_mut() {
-            stored.last_refresh = Some(std::time::Instant::now());
-        }
+        && let Some(stored) = state.last_inline.as_mut()
+    {
+        stored.last_refresh = Some(std::time::Instant::now());
+    }
 }
 
 pub fn download_message_media(
@@ -363,12 +364,18 @@ pub fn indexed_media_for_download(
     kind: media::MediaDownloadKind,
 ) -> Option<Result<(i32, Snapshot, media::MediaRef), MtprotoError>> {
     let indexed = data.media.get(&(chat_id, message_id))?;
-    if media::inline_payload_missing(indexed) {
+    if media::inline_payload_missing(indexed) || data.session_dead || data.user_id.is_none() {
         return None;
     }
-    if data.session_dead
-        || data.user_id.is_none()
-        || media::peer_photo_needs_hash(indexed)
+    let mut repaired;
+    let indexed = if media::peer_photo_needs_hash(indexed) {
+        repaired = indexed.clone();
+        media::fill_peer_photo_hash(&mut repaired, &data.peers, chat_id);
+        &repaired
+    } else {
+        indexed
+    };
+    if media::peer_photo_needs_hash(indexed)
         || (message_id == 0
             && kind == media::MediaDownloadKind::Full
             && data.peers.contains_key(&chat_id)
@@ -418,6 +425,7 @@ pub fn download_message_media_range(
         mono_proto_media::perf::count("media.lookup.main_fallback");
         with_client_mut(handle, |state| {
             ensure_ready(state)?;
+            let mut avatar_repair = peer_avatar::AvatarRepair::default();
             if !state.media.contains_key(&(chat_id, message_id)) {
                 if message_id == mono_proto_messages::instant_view::INSTANT_VIEW_MEDIA_MSG {
                     // Indexed only by messages.getWebPage as (media_id, -1).
@@ -425,7 +433,7 @@ pub fn download_message_media_range(
                 } else if message_id == 0 {
                     // `(document_id, 0)` is also a sticker or GIF. peer_avatar_fetch
                     // skips those ids so get_profile cannot overwrite a user avatar.
-                    reindex_peer_avatar(state, chat_id);
+                    avatar_repair.missing(|| reindex_peer_avatar(state, chat_id));
                 } else {
                     let _ = call_with_migrate(state, |state| {
                         with_peer_refresh(state, chat_id, |state| {
@@ -447,9 +455,15 @@ pub fn download_message_media_range(
                 .is_some_and(media::peer_photo_needs_hash)
             {
                 let _ = call_with_migrate(state, refresh_dialogs);
-                media::fill_zero_peer_photo_hashes(&mut state.media, &state.peers);
+                media::fill_zero_peer_photo_hash(
+                    &mut state.media,
+                    &state.peers,
+                    chat_id,
+                    message_id,
+                );
             }
             if message_id == 0
+                && !avatar_repair.profile_attempted
                 && kind == media::MediaDownloadKind::Full
                 && state.peers.contains_key(&chat_id)
                 && state
@@ -478,13 +492,17 @@ pub fn download_message_media_range(
             if indexed.is_none() {
                 // Local index gap (cold history, cleared cache, peer hash expired):
                 // re-fetch this message's media instead of failing the download outright.
-                let _ = mono_proto_runtime::rpc::with_rpc_timeout_secs(20, || {
-                    call_with_migrate(state, |state| {
-                        with_peer_refresh(state, chat_id, |state| {
-                            refresh_file_source(state, chat_id, message_id)
+                if message_id == 0 {
+                    avatar_repair.missing(|| reindex_peer_avatar(state, chat_id));
+                } else {
+                    let _ = mono_proto_runtime::rpc::with_rpc_timeout_secs(20, || {
+                        call_with_migrate(state, |state| {
+                            with_peer_refresh(state, chat_id, |state| {
+                                refresh_file_source(state, chat_id, message_id)
+                            })
                         })
-                    })
-                });
+                    });
+                }
                 indexed = state.media.get(&(chat_id, message_id)).cloned();
             }
             let indexed = indexed.ok_or_else(|| {

@@ -40,11 +40,10 @@ pub fn chunk_size() -> i32 {
 fn resolve_chunk(offset: Option<i64>) -> i32 {
     let forced = forced_chunk();
     let desired = if forced > 0 { forced } else { chunk_size() };
-    if let Some(off) = offset {
-        if off > 0 && off % i64::from(desired) != 0 && off % i64::from(DEFAULT_CHUNK) == 0 {
+    if let Some(off) = offset
+        && off > 0 && off % i64::from(desired) != 0 && off % i64::from(DEFAULT_CHUNK) == 0 {
             return DEFAULT_CHUNK;
         }
-    }
     desired
 }
 
@@ -251,13 +250,12 @@ pub fn download_media_range_with_fetch(
         return Ok(dest_path.display().to_string());
     }
 
-    if let Some(dc) = media_dc(&media.location) {
-        if dc != 0 && dc != dc_id {
+    if let Some(dc) = media_dc(&media.location)
+        && dc != 0 && dc != dc_id {
             // File DC only — caller copies authorization onto a media lane.
             // Do not wipe the snapshot auth key here.
             return Err(MtprotoError::Message(format!("FILE_MIGRATE_{dc}")));
         }
-    }
 
     let location = input_location(&media.location)?;
     write_file_or_cleanup(dest_path, |out| {
@@ -956,15 +954,14 @@ impl StagedDownload {
         if download_cancelled(destination) {
             return Err(MtprotoError::Message("cancelled".into()));
         }
-        if resume {
-            if let Some(path) = take_resume_file(destination) {
+        if resume
+            && let Some(path) = take_resume_file(destination) {
                 return Ok(Self {
                     path,
                     preserve: false,
                     _lock: lock,
                 });
             }
-        }
         loop {
             let mut name = destination.as_os_str().to_os_string();
             name.push(format!(
@@ -1129,11 +1126,10 @@ pub fn download_media_range_batched_streaming_capped(
             },
         );
     }
-    if let Some(dc) = media_dc(&media.location) {
-        if dc != 0 && dc != dc_id {
+    if let Some(dc) = media_dc(&media.location)
+        && dc != 0 && dc != dc_id {
             return Err(MtprotoError::Message(format!("FILE_MIGRATE_{dc}")));
         }
-    }
 
     let location = input_location(&media.location)?;
     if let Some(parent) = dest_path.parent() {
@@ -1146,8 +1142,8 @@ pub fn download_media_range_batched_streaming_capped(
             .unwrap_or(0);
         let identity = location_identity(&media.location, media.file_size.unwrap_or(0), dc_id);
         let mut loaded_ranges = if stream { None } else { load_ranges(dest_path) };
-        if !stream {
-            if let Some(identity) = identity.clone() {
+        if !stream
+            && let Some(identity) = identity.clone() {
                 if file_len > 0 && !resume_allowed(load_identity(dest_path).as_ref(), &identity) {
                     loaded_ranges = None;
                     file_len = 0;
@@ -1155,7 +1151,6 @@ pub fn download_media_range_batched_streaming_capped(
                 }
                 store_identity(dest_path, &identity);
             }
-        }
         let chunk_now = resolve_chunk(offset);
         let origin = if stream {
             offset.unwrap_or(0)
@@ -1170,11 +1165,10 @@ pub fn download_media_range_batched_streaming_capped(
             let end = media.file_size.filter(|size| *size > 0).unwrap_or(i64::MAX);
             Some(MissingRanges::span(origin, end))
         };
-        if !stream {
-            if let Some(ranges) = missing.as_ref() {
+        if !stream
+            && let Some(ranges) = missing.as_ref() {
                 store_ranges(dest_path, ranges);
             }
-        }
         let mut out = if !stream && file_len > 0 {
             use std::io::{Seek, SeekFrom};
             let mut file = fs::OpenOptions::new()
@@ -1516,8 +1510,8 @@ pub fn download_media_range_batched_streaming_capped(
                             return Err(MtprotoError::Message("unexpected media response".into()));
                         }
                         Err(err) => {
-                            if !retried_limit && is_limit_invalid(&err) {
-                                if let Some(next) = limit_invalid_window(DownloadWindow {
+                            if !retried_limit && is_limit_invalid(&err)
+                                && let Some(next) = limit_invalid_window(DownloadWindow {
                                     chunk,
                                     in_flight: width,
                                 }) {
@@ -1526,7 +1520,6 @@ pub fn download_media_range_batched_streaming_capped(
                                     retried_limit = true;
                                     continue 'download;
                                 }
-                            }
                             if flood_wait_secs(&err).is_some() {
                                 note_transfer_flood(dc_id, TransferClass::Download, &err);
                                 return Err(err);
@@ -1607,13 +1600,12 @@ where
     }
     let mut file = fs::File::create(dest_path).map_err(|e| MtprotoError::Message(e.to_string()))?;
     let written = write(&mut file);
-    if written.is_ok() {
-        if let Err(e) = file.flush() {
+    if written.is_ok()
+        && let Err(e) = file.flush() {
             drop(file);
             let _ = fs::remove_file(dest_path);
             return Err(MtprotoError::Message(e.to_string()));
         }
-    }
     drop(file);
     match written {
         Ok(()) => Ok(dest_path.display().to_string()),

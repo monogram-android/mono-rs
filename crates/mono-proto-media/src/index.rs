@@ -304,7 +304,22 @@ enum PersistClass {
 
 fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
     // `(id, 0)` is also stickers, GIFs, inline files, and custom emoji.
-    if matches!(media.location, MediaLocation::PeerPhoto { .. }) || is_resolved_video_avatar(media)
+    // Resolved static avatars use Photo/Inline locations too. Their exact
+    // existing cache identity distinguishes them without changing stored types.
+    let resolved_static_avatar = key.1 == 0
+        && media.kind == "photo"
+        && matches!(
+            media.location,
+            MediaLocation::Photo { .. } | MediaLocation::Inline { .. }
+        )
+        && media
+            .cache_key
+            .strip_prefix("avatar:")
+            .and_then(|id| id.parse::<i64>().ok())
+            == Some(key.0);
+    if matches!(media.location, MediaLocation::PeerPhoto { .. })
+        || is_resolved_video_avatar(media)
+        || resolved_static_avatar
     {
         return PersistClass::Avatar;
     }
@@ -363,33 +378,23 @@ pub fn insert_media(index: &mut MediaIndex, key: (i64, i32), media: MediaRef) {
 }
 
 pub fn bound_media_index(index: &mut MediaIndex) {
-    for class in [
-        PersistClass::Message,
-        PersistClass::ZeroDocument,
-        PersistClass::Instant,
-    ] {
-        let Some(cap) = class_cap(class) else {
-            continue;
+    let mut kept = [0usize; 3];
+    let mut drop_keys = crate::collections::HashSet::default();
+    for (key, media) in index.iter().rev() {
+        let (slot, cap) = match persist_class(key, media) {
+            PersistClass::Avatar => continue,
+            PersistClass::Message => (0, MESSAGE_MEDIA_CAP),
+            PersistClass::ZeroDocument => (1, ZERO_ID_DOCUMENT_CAP),
+            PersistClass::Instant => (2, INSTANT_VIEW_CAP),
         };
-        let keys: Vec<_> = index
-            .iter()
-            .filter(|(key, media)| persist_class(key, media) == class)
-            .map(|(key, _)| *key)
-            .collect();
-        let overflow = keys.len().saturating_sub(cap);
-        if overflow == 0 {
-            continue;
+        if kept[slot] == cap {
+            drop_keys.insert(*key);
+        } else {
+            kept[slot] += 1;
         }
-        let drop_keys: crate::collections::HashSet<(i64, i32)> =
-            keys.into_iter().take(overflow).collect();
-        let mut kept =
-            MediaIndex::with_capacity_and_hasher(index.len() - drop_keys.len(), Default::default());
-        for (key, value) in std::mem::take(index) {
-            if !drop_keys.contains(&key) {
-                kept.insert(key, value);
-            }
-        }
-        *index = kept;
+    }
+    if !drop_keys.is_empty() {
+        index.retain(|key, _| !drop_keys.contains(key));
     }
 }
 
@@ -416,11 +421,10 @@ pub fn persisted_media_entry(message_id: i32, media: &MediaRef) -> Option<MediaR
 }
 
 fn strip_large_inline(location: &mut MediaLocation) {
-    if let MediaLocation::Inline { bytes, .. } = location {
-        if bytes.len() > PERSISTED_INLINE_BYTE_CAP {
+    if let MediaLocation::Inline { bytes, .. } = location
+        && bytes.len() > PERSISTED_INLINE_BYTE_CAP {
             bytes.clear();
         }
-    }
 }
 
 pub fn needs_video_avatar_upgrade(media: &MediaRef) -> bool {
@@ -439,14 +443,13 @@ fn avatar_photo_id(media: &MediaRef) -> Option<i64> {
 /// `InputPeerPhotoFileLocation` for the same photo id.
 pub fn index_avatar(media: &mut MediaIndex, chat_id: i64, incoming: MediaRef) -> String {
     let key = (chat_id, 0);
-    if let Some(existing) = media.get(&key) {
-        if is_resolved_video_avatar(existing)
+    if let Some(existing) = media.get(&key)
+        && is_resolved_video_avatar(existing)
             && !is_resolved_video_avatar(&incoming)
             && avatar_photo_id(existing) == avatar_photo_id(&incoming)
         {
             return existing.cache_key.clone();
         }
-    }
     let cache_key = incoming.cache_key.clone();
     insert_media(media, key, incoming);
     cache_key
@@ -575,8 +578,8 @@ pub fn webpage_media(
         file_size: None,
         supports_streaming: false,
     };
-    if let Some(photo) = page.photo.as_ref() {
-        if let Photo::Photo(ph) = photo.as_ref() {
+    if let Some(photo) = page.photo.as_ref()
+        && let Photo::Photo(ph) = photo.as_ref() {
             let cache_key = format!("photo:{}", ph.id);
             if let Some(mut indexed) = media_ref_from_photo_with_thumbs(photo.as_ref(), cache_key) {
                 indexed.kind = "webpage".into();
@@ -597,7 +600,6 @@ pub fn webpage_media(
                 return Some((indexed, metrics));
             }
         }
-    }
     Some((
         MediaRef {
             file_size: None,
@@ -1024,7 +1026,7 @@ pub fn media_ref_from_document(doc: &mono_proto::latest::api::DocumentConstructo
     };
     let mut media = MediaRef {
         file_size: Some(doc.size),
-        kind: kind.into(),
+        kind: kind,
         cache_key,
         location: document_file_location(doc, String::new(), None),
         thumb_cache_key: None,

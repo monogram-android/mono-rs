@@ -1,4 +1,5 @@
 use mono_proto_runtime::client_session::ChannelRecovery;
+use mono_proto_media::media::{MediaIndex, MediaRef};
 use mono_proto_types::collections::{HashMap, IndexMap};
 use mono_proto_types::updates_state::UpdatesStateDto;
 use std::collections::VecDeque;
@@ -21,6 +22,9 @@ pub fn prefer_newer_cursor(
 // Commit only this lane's changes. An unchanged cloned entry must never
 // overwrite data fetched by another lane while this lane was on the network.
 pub trait MergeMap<K, V> {
+    fn shares_snapshot_with(&self, _other: &Self) -> bool {
+        false
+    }
     fn contains_key(&self, key: &K) -> bool;
     fn get(&self, key: &K) -> Option<&V>;
     fn insert(&mut self, key: K, value: V) -> Option<V>;
@@ -74,6 +78,29 @@ where
     }
 }
 
+impl MergeMap<(i64, i32), MediaRef> for MediaIndex {
+    fn shares_snapshot_with(&self, other: &Self) -> bool {
+        self.shares_storage_with(other)
+    }
+    fn contains_key(&self, key: &(i64, i32)) -> bool {
+        IndexMap::contains_key(&**self, key)
+    }
+    fn get(&self, key: &(i64, i32)) -> Option<&MediaRef> {
+        IndexMap::get(&**self, key)
+    }
+    fn insert(&mut self, key: (i64, i32), value: MediaRef) -> Option<MediaRef> {
+        IndexMap::insert(&mut **self, key, value)
+    }
+    fn retain(&mut self, f: &mut dyn FnMut(&(i64, i32), &mut MediaRef) -> bool) {
+        IndexMap::retain(&mut **self, |key, value| f(key, value));
+    }
+    fn for_each_entry(self, f: &mut dyn FnMut((i64, i32), MediaRef)) {
+        for (key, value) in self {
+            f(key, value);
+        }
+    }
+}
+
 impl MergeMap<i64, ChannelRecovery> for VecDeque<ChannelRecovery> {
     fn contains_key(&self, key: &i64) -> bool {
         self.iter().any(|entry| entry.chat_id == *key)
@@ -110,6 +137,9 @@ where
     V: PartialEq,
     M: MergeMap<K, V>,
 {
+    if incoming.shares_snapshot_with(before) {
+        return false;
+    }
     let mut changed = false;
     current.retain(&mut |key, value| {
         let keep = incoming.contains_key(key) || before.get(key) != Some(value);
@@ -126,3 +156,7 @@ where
     });
     changed
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/media_snapshot_merge_tests.rs"]
+mod media_snapshot_merge_tests;

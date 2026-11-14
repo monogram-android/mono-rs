@@ -146,13 +146,15 @@ pub fn with_client_mut_binding<T>(
         .as_ref()
         .err()
         .is_some_and(|err| temporary_key_failure(&state, err));
-    if !temp_failed && !state.session_dead
+    if !temp_failed
+        && !state.session_dead
         && let Err(error) = &result
-            && kills_session(state.user_id, error) {
-                tcp::with_connection_control(&client.connections, || {
-                    mark_session_dead(&mut state, error);
-                });
-            }
+        && kills_session(state.user_id, error)
+    {
+        tcp::with_connection_control(&client.connections, || {
+            mark_session_dead(&mut state, error);
+        });
+    }
     if temp_failed {
         expire_temporary_lane(&client, &mut io, result.as_ref().err().unwrap());
         state.temp_expires_at = 1;
@@ -367,34 +369,37 @@ pub fn with_read_lane<T>(
         if d.session_dead || d.home_session_id != home_session_id {
             None
         } else {
-            Some(ClientState {
-                api_id: d.api_id,
-                api_hash: d.api_hash.clone(),
-                session_path: d.session_path.clone(),
-                snapshot: io.snapshot.clone(),
-                user_id: d.user_id,
-                peers: d.peers.clone(),
-                updates: d.updates.clone(),
-                media: d.media.clone(),
-                updates_started: d.updates_started,
-                channel_pts: d.channel_pts.clone(),
-                channel_recovery: d.channel_recovery.clone(),
-                seen_messages: d.seen_messages.clone(),
-                logout_tokens: d.logout_tokens.clone(),
-                new_session: d.new_session.clone(),
-                session_dead: d.session_dead,
-                session_dead_reason: d.session_dead_reason.clone(),
-                test_dc: d.test_dc,
-                last_inline: d.last_inline.clone(),
-                permanent: (io.temp_expires_at != 0 || io.perm_key.is_some())
-                    .then(|| d.home_snapshot.clone()),
-                temp_expires_at: io.temp_expires_at,
-                dc_auth_keys: d.dc_auth_keys.clone(),
-                journal: Arc::clone(&d.journal),
-            })
+            Some((
+                ClientState {
+                    api_id: d.api_id,
+                    api_hash: d.api_hash.clone(),
+                    session_path: d.session_path.clone(),
+                    snapshot: io.snapshot.clone(),
+                    user_id: d.user_id,
+                    peers: d.peers.clone(),
+                    updates: d.updates.clone(),
+                    media: d.media.clone(),
+                    updates_started: d.updates_started,
+                    channel_pts: d.channel_pts.clone(),
+                    channel_recovery: d.channel_recovery.clone(),
+                    seen_messages: d.seen_messages.clone(),
+                    logout_tokens: d.logout_tokens.clone(),
+                    new_session: d.new_session.clone(),
+                    session_dead: d.session_dead,
+                    session_dead_reason: d.session_dead_reason.clone(),
+                    test_dc: d.test_dc,
+                    last_inline: d.last_inline.clone(),
+                    permanent: (io.temp_expires_at != 0 || io.perm_key.is_some())
+                        .then(|| d.home_snapshot.clone()),
+                    temp_expires_at: io.temp_expires_at,
+                    dc_auth_keys: d.dc_auth_keys.clone(),
+                    journal: Arc::clone(&d.journal),
+                },
+                d.home_time_offset,
+            ))
         }
     };
-    let mut state = match built {
+    let (mut state, before_home_time_offset) = match built {
         Some(state) => state,
         None => {
             drop(io);
@@ -459,24 +464,32 @@ pub fn with_read_lane<T>(
         io.pending_push = Default::default();
         io.last_difference = None;
     }
-    {
+    let persist_needed = {
         let mut d = client.data.lock();
         if d.home_session_id == home_session_id && !d.session_dead {
-            let _ = merge_changed_entries(&mut d.peers, &before_peers, state.peers);
-            let _ = merge_changed_entries(&mut d.media, &before_media, state.media);
-            let _ =
+            // Keep the three-way baselines: a stale, unchanged read must not
+            // overwrite a concurrent lane's entries or manufacture a save.
+            let peers_changed = merge_changed_entries(&mut d.peers, &before_peers, state.peers);
+            let media_changed = merge_changed_entries(&mut d.media, &before_media, state.media);
+            let channels_changed =
                 merge_changed_entries(&mut d.channel_pts, &before_channel_pts, state.channel_pts);
-            if state.channel_recovery != before_recovery {
-                merge_changed_entries(
+            let recovery_changed = state.channel_recovery != before_recovery
+                && merge_changed_entries(
                     &mut d.channel_recovery,
                     &before_recovery,
                     state.channel_recovery,
                 );
-            }
+            let seen_before = d.seen_messages.len();
             d.seen_messages.extend(state.seen_messages);
-            d.updates = prefer_newer_cursor(d.updates.clone(), state.updates);
+            let updates = prefer_newer_cursor(d.updates.clone(), state.updates);
+            let updates_changed = d.updates != updates;
+            d.updates = updates;
+            let started_changed = !d.updates_started && state.updates_started;
             d.updates_started |= state.updates_started;
+            let tokens_changed = d.logout_tokens != state.logout_tokens;
             d.logout_tokens = state.logout_tokens;
+            let metadata_changed =
+                state.new_session.is_some() && d.new_session != state.new_session;
             if state.new_session.is_some() {
                 d.new_session = state.new_session;
             }
@@ -486,26 +499,60 @@ pub fn with_read_lane<T>(
                 d.session_dead_reason = state.session_dead_reason.clone();
             }
             d.last_inline = state.last_inline;
+            let mut salt_changed = false;
             if state.permanent.is_none() && state.snapshot.auth_key == d.home_auth_key {
+                salt_changed = d.home_salt != state.snapshot.server_salt;
                 d.home_salt = state.snapshot.server_salt;
                 d.home_snapshot.server_salt = state.snapshot.server_salt;
             }
-            d.home_time_offset = state.snapshot.time_offset_micros;
-            if before_dc_auth_keys != state.dc_auth_keys {
-                d.dc_auth_keys = state.dc_auth_keys.clone();
+            // Only publish a correction learned by this request. An unchanged
+            // bound lane can carry an older clock, and a concurrent correction
+            // accepted since this request started wins over ours.
+            let time_changed = state.snapshot.time_offset_micros
+                != before_snapshot.time_offset_micros
+                && d.home_time_offset == before_home_time_offset
+                && d.home_time_offset != state.snapshot.time_offset_micros;
+            if time_changed {
+                d.home_time_offset = state.snapshot.time_offset_micros;
+                d.home_snapshot.time_offset_micros = state.snapshot.time_offset_micros;
             }
-            if result.is_ok() || terminal_changed {
+            let keys_changed =
+                before_dc_auth_keys != state.dc_auth_keys && d.dc_auth_keys != state.dc_auth_keys;
+            if keys_changed {
+                d.dc_auth_keys = state.dc_auth_keys;
+            }
+            if peers_changed
+                || media_changed
+                || channels_changed
+                || recovery_changed
+                || seen_before != d.seen_messages.len()
+                || updates_changed
+                || started_changed
+                || tokens_changed
+                || metadata_changed
+                || terminal_changed
+                || salt_changed
+                || time_changed
+                || keys_changed
+            {
+                // Failed RPCs can still repair durable state (salt, clock,
+                // peers, recovery). Do not leave those mutations unaccounted.
                 d.persist_epoch = d.persist_epoch.saturating_add(1);
             }
+            // Retry outstanding work even when this particular read was clean.
+            d.persist_epoch != d.persisted_epoch
+        } else {
+            false
         }
-    }
+    };
     drop(io);
     schedule_file_cleanup(&client);
-    if result
-        .as_ref()
-        .err()
-        .and_then(mono_proto_runtime::api_invoke::migrate_dc)
-        .is_none()
+    if persist_needed
+        && result
+            .as_ref()
+            .err()
+            .and_then(mono_proto_runtime::api_invoke::migrate_dc)
+            .is_none()
     {
         schedule_persist(&client, home_session_id);
     }
@@ -519,6 +566,18 @@ pub fn with_read_lane<T>(
     }
     result
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/access_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/native_bench.rs"]
+mod native_bench;
+
+#[cfg(test)]
+#[path = "../tests/unit/native_read_workload.rs"]
+mod native_read_workload;
 
 pub fn ensure_ready(state: &mut ClientState) -> Result<(), MtprotoError> {
     ensure_auth_key(state)

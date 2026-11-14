@@ -162,11 +162,10 @@ pub fn pick_display_candidate(
         .filter(|(ty, _, bytes)| is_usable_thumb(ty, bytes))
         .collect();
     for wanted in ["m", "s", "x"] {
-        if let Some((ty, _, bytes)) = usable.iter().find(|(ty, _, _)| ty == wanted) {
-            if Some(ty.as_str()) != thumb_ty && ty != full_ty {
+        if let Some((ty, _, bytes)) = usable.iter().find(|(ty, _, _)| ty == wanted)
+            && Some(ty.as_str()) != thumb_ty && ty != full_ty {
                 return Some((ty.clone(), bytes.clone()));
             }
-        }
     }
     None
 }

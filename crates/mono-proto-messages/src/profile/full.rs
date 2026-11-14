@@ -25,6 +25,10 @@ use crate::{MtprotoError, ProfileDto};
 
 pub(crate) const CHANNEL_OFFSET: i64 = 1_000_000_000_000;
 
+#[cfg(test)]
+#[path = "../../tests/unit/full_chat_photo_tests.rs"]
+mod tests;
+
 pub(crate) fn first_username(
     username: &Option<String>,
     usernames: &Option<Box<Vector<Box<Username>>>>,
@@ -86,26 +90,28 @@ pub(crate) fn index_user_avatar(
 ) -> Option<String> {
     let cache_key = format!("avatar:{peer_chat_id}");
     if let Some(photo) = profile_photo.or(personal_photo)
-        && let Some(media) = media::media_ref_from_photo(photo, cache_key.clone()) {
-            return Some(media::index_avatar(media_index, peer_chat_id, media));
-        }
+        && let Some(media) = media::media_ref_from_photo(photo, cache_key.clone())
+    {
+        return Some(media::index_avatar(media_index, peer_chat_id, media));
+    }
     if let User::User(u) = user
         && let Some(photo) = u.photo.as_ref()
-            && let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref() {
-                let access_hash = u.access_hash.unwrap_or(0);
-                let has_video = p.has_video.is_some();
-                let media = media::media_ref_peer_photo(
-                    PeerKind::User,
-                    u.id,
-                    access_hash,
-                    p.photo_id,
-                    p.dc_id,
-                    media::avatar_cache_key(peer_chat_id, has_video),
-                    has_video,
-                    p.stripped_thumb.as_deref(),
-                );
-                return Some(media::index_avatar(media_index, peer_chat_id, media));
-            }
+        && let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref()
+    {
+        let access_hash = u.access_hash.unwrap_or(0);
+        let has_video = p.has_video.is_some();
+        let media = media::media_ref_peer_photo(
+            PeerKind::User,
+            u.id,
+            access_hash,
+            p.photo_id,
+            p.dc_id,
+            media::avatar_cache_key(peer_chat_id, has_video),
+            has_video,
+            p.stripped_thumb.as_deref(),
+        );
+        return Some(media::index_avatar(media_index, peer_chat_id, media));
+    }
     None
 }
 
@@ -132,6 +138,50 @@ pub(crate) fn index_chat_photo(
         p.stripped_thumb.as_deref(),
     );
     Some(media::index_avatar(media_index, peer_chat_id, media))
+}
+
+pub(crate) fn index_full_chat_photo(
+    media_index: &mut MediaIndex,
+    peer_chat_id: i64,
+    full: &ChatFull,
+) -> Option<String> {
+    let photo = match full {
+        ChatFull::ChatFull(chat) => chat.chat_photo.as_deref(),
+        ChatFull::ChannelFull(channel) => Some(channel.chat_photo.as_ref()),
+        _ => None,
+    }?;
+    let cache_key = format!("avatar:{peer_chat_id}");
+    let mut entry = media::media_ref_from_photo(photo, cache_key.clone())?;
+    if let Some(still) = media::media_ref_from_photo_with_thumbs(photo, cache_key) {
+        // Both static and video replacements must retain all download kinds.
+        // With just one still size it also serves as the downloadable thumb.
+        entry.thumb_cache_key = still
+            .thumb_cache_key
+            .or_else(|| Some(still.cache_key.clone()));
+        entry.thumb_location = still
+            .thumb_location
+            .or_else(|| Some(still.location.clone()));
+        entry.display_cache_key = Some(still.cache_key);
+        entry.display_location = Some(still.location);
+    } else if let Some(existing) = media_index.get(&(peer_chat_id, 0))
+        && matches!((&existing.location, &entry.location),
+            (media::MediaLocation::PeerPhoto { photo_id, .. }, media::MediaLocation::Photo { id, .. })
+                | (media::MediaLocation::Photo { id: photo_id, .. }, media::MediaLocation::Photo { id, .. }) if photo_id == id)
+    {
+        // A full video can omit still sizes. Keep a matching cached photo's
+        // projections, never an older/different profile picture.
+        entry.display_cache_key = existing.display_cache_key.clone();
+        entry.display_location = existing.display_location.clone();
+        entry.thumb_cache_key = existing
+            .thumb_cache_key
+            .clone()
+            .or_else(|| existing.display_cache_key.clone());
+        entry.thumb_location = existing
+            .thumb_location
+            .clone()
+            .or_else(|| existing.display_location.clone());
+    }
+    Some(media::index_avatar(media_index, peer_chat_id, entry))
 }
 
 pub(crate) fn fetch_user_full(
@@ -235,9 +285,9 @@ pub(crate) fn fetch_basic_chat(
     let MessagesChatFull::MessagesChatFull(full) = response else {
         return Err(MtprotoError::Message("unexpected messages.chatFull".into()));
     };
-    let about = match *full.full_chat {
-        ChatFull::ChatFull(c) => Some(c.about).filter(|s| !s.is_empty()),
-        ChatFull::ChannelFull(c) => Some(c.about).filter(|s| !s.is_empty()),
+    let about = match full.full_chat.as_ref() {
+        ChatFull::ChatFull(c) => Some(c.about.clone()).filter(|s| !s.is_empty()),
+        ChatFull::ChannelFull(c) => Some(c.about.clone()).filter(|s| !s.is_empty()),
         _ => None,
     };
     let peer_id = chat_id_for_chat(chat_id);
@@ -260,6 +310,8 @@ pub(crate) fn fetch_basic_chat(
             _ => {}
         }
     }
+    avatar_cache_key =
+        index_full_chat_photo(media_index, peer_id, &full.full_chat).or(avatar_cache_key);
     Ok(ProfileDto {
         id: peer_id,
         kind: "chat".into(),
@@ -312,7 +364,8 @@ pub(crate) fn fetch_channel(
             "unexpected channels.getFullChannel result".into(),
         ));
     };
-    let (about, members_count, online_count, can_view_participants) = match *full.full_chat {
+    let (about, members_count, online_count, can_view_participants) = match full.full_chat.as_ref()
+    {
         ChatFull::ChannelFull(c) => (
             Some(c.about.clone()).filter(|s| !s.is_empty()),
             c.participants_count,
@@ -363,6 +416,8 @@ pub(crate) fn fetch_channel(
             _ => {}
         }
     }
+    avatar_cache_key =
+        index_full_chat_photo(media_index, peer_id, &full.full_chat).or(avatar_cache_key);
     // Broadcast channels expose the subscriber list only when the server allows it;
     // megagroups are attempted anyway and hidden on failure.
     let participants_visible = if kind == "channel" {

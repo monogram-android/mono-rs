@@ -9,7 +9,7 @@ use std::sync::{Arc, LazyLock};
 use parking_lot::Mutex;
 
 use crate::session_store::FileSessionStore;
-use mono_proto_media::persistence::{media_from_index, media_order_from_index};
+use mono_proto_media::persistence::media_and_order_from_index;
 use mono_proto_storage::client_session::ClientSession;
 use mono_proto_types::MtprotoError;
 
@@ -95,13 +95,14 @@ pub fn persist(state: &mut ClientState) -> Result<(), MtprotoError> {
         return Ok(());
     }
     mono_proto_media::media::bound_media_index(&mut state.media);
+    let (media, media_order) = media_and_order_from_index(&state.media);
     let session = ClientSession {
         snapshot: durable_snapshot(state),
         user_id: state.user_id,
         peers: state.peers.clone(),
         updates: state.updates.clone(),
-        media: media_from_index(&state.media),
-        media_order: media_order_from_index(&state.media),
+        media,
+        media_order,
         channel_pts: state.channel_pts.clone(),
         channel_recovery: state.channel_recovery.clone(),
         seen_messages: state.seen_messages.clone(),
@@ -154,14 +155,15 @@ pub fn persist_updates_data(client: &Client, session_id: i64) -> Result<bool, Mt
         } else {
             main.snapshot.clone()
         };
-        snapshot.time_offset_micros = main.snapshot.time_offset_micros;
+        snapshot.time_offset_micros = d.home_time_offset;
+        let (media, media_order) = media_and_order_from_index(&d.media);
         let session = ClientSession {
             snapshot,
             user_id: d.user_id,
             peers: d.peers.clone(),
             updates: d.updates.clone(),
-            media: media_from_index(&d.media),
-            media_order: media_order_from_index(&d.media),
+            media,
+            media_order,
             channel_pts: d.channel_pts.clone(),
             channel_recovery: d.channel_recovery.clone(),
             seen_messages: d.seen_messages.clone(),
@@ -226,7 +228,6 @@ pub fn persist_updates_data(client: &Client, session_id: i64) -> Result<bool, Mt
 
 #[cfg(any(test, feature = "test-support"))]
 pub static FORCE_STALE_SAVES: AtomicU32 = AtomicU32::new(0);
-
 
 pub fn persist_journal_sync(client: &Client, session_id: i64) -> Result<(), MtprotoError> {
     let mut last = None;

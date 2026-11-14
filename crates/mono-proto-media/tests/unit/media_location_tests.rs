@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn targeted_hash_repair_updates_only_requested_entry_and_both_locations() {
+    use crate::peers::{CachedPeer, PeerKind};
+    let mut peers = HashMap::default();
+    peers.insert(
+        7,
+        CachedPeer {
+            kind: PeerKind::User,
+            id: 7,
+            access_hash: 77,
+            min_hash: false,
+        },
+    );
+    let mut media = MediaIndex::default();
+    let item = crate::media::media_ref_peer_photo(
+        PeerKind::User,
+        7,
+        0,
+        9,
+        2,
+        "avatar:7".into(),
+        false,
+        None,
+    );
+    media.insert((7, 0), item.clone());
+    media.insert((7, 1), item.clone());
+    fill_zero_peer_photo_hash(&mut media, &peers, 7, 0);
+    assert!(matches!(
+        media[&(7, 0)].location,
+        MediaLocation::PeerPhoto {
+            access_hash: 77,
+            ..
+        }
+    ));
+    assert!(matches!(
+        media[&(7, 0)].display_location,
+        Some(MediaLocation::PeerPhoto {
+            access_hash: 77,
+            ..
+        })
+    ));
+    assert_eq!(media[&(7, 1)], item);
+    // Nonzero hashes are not replaced, and min peers cannot supply a hash.
+    peers.get_mut(&7).unwrap().access_hash = 88;
+    fill_zero_peer_photo_hash(&mut media, &peers, 7, 0);
+    assert!(matches!(
+        media[&(7, 0)].location,
+        MediaLocation::PeerPhoto {
+            access_hash: 77,
+            ..
+        }
+    ));
+    peers.get_mut(&7).unwrap().min_hash = true;
+    fill_zero_peer_photo_hash(&mut media, &peers, 7, 1);
+    assert_eq!(media[&(7, 1)], item);
+}
+
+#[test]
 fn scheduled_media_ids_exclude_history_avatars_and_instant_view() {
     for id in [1, 37, i32::MAX] {
         let encoded = scheduled_media_id(id).unwrap();

@@ -153,5 +153,9 @@ impl FileSessionStore {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/native_storage_workload.rs"]
+mod native_storage_workload;
+
+#[cfg(test)]
 #[path = "../tests/unit/session_store_tests.rs"]
 mod tests;

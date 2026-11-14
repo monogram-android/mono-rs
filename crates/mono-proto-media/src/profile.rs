@@ -1,4 +1,3 @@
-use crate::transfer_policy;
 use crate::transfer_window::*;
 
 std::thread_local! {

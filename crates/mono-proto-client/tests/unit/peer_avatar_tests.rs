@@ -2,6 +2,31 @@ use super::{PeerAvatarFetch, peer_avatar_fetch};
 use mono_proto_types::collections::HashMap;
 use mono_proto_types::peers::{CachedPeer, PeerKind};
 
+#[test]
+fn missing_avatar_repair_is_once_per_request_even_without_a_photo() {
+    for profile_attempted in [false, true] {
+        let mut attempts = 0;
+        let mut repair = super::AvatarRepair::default();
+        repair.missing(|| {
+            attempts += 1;
+            profile_attempted
+        });
+        repair.missing(|| {
+            attempts += 1;
+            true
+        });
+        assert_eq!(attempts, 1);
+        assert_eq!(repair.profile_attempted, profile_attempted);
+        // A new request may retry; actual file-reference refresh is not gated.
+        let mut next_request = super::AvatarRepair::default();
+        next_request.missing(|| {
+            attempts += 1;
+            true
+        });
+        assert_eq!(attempts, 2);
+    }
+}
+
 fn empty_peers() -> HashMap<i64, CachedPeer> {
     HashMap::default()
 }

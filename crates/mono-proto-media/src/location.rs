@@ -1,4 +1,6 @@
 use crate::collections::{HashMap, IndexMap};
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use mono_proto::latest::api::{
     InputDocumentFileLocationConstructor, InputFileLocation, InputPeer,
@@ -23,7 +25,75 @@ pub fn scheduled_message_id(media_id: i32) -> Option<i32> {
     (media_id < -1).then(|| -1 - media_id)
 }
 
-pub type MediaIndex = IndexMap<(i64, i32), MediaRef>;
+/// Snapshot clones share payloads until mutable access detaches the map.
+/// Owned `IndexMap` callers can convert with `From`/`Into` in either direction.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MediaIndex(Arc<IndexMap<(i64, i32), MediaRef>>);
+
+impl MediaIndex {
+    pub fn shares_storage_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Deref for MediaIndex {
+    type Target = IndexMap<(i64, i32), MediaRef>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for MediaIndex {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl IntoIterator for MediaIndex {
+    type Item = ((i64, i32), MediaRef);
+    type IntoIter = <IndexMap<(i64, i32), MediaRef> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Arc::unwrap_or_clone(self.0).into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a MediaIndex {
+    type Item = (&'a (i64, i32), &'a MediaRef);
+    type IntoIter = <&'a IndexMap<(i64, i32), MediaRef> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut MediaIndex {
+    type Item = (&'a (i64, i32), &'a mut MediaRef);
+    type IntoIter = <&'a mut IndexMap<(i64, i32), MediaRef> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Arc::make_mut(&mut self.0).iter_mut()
+    }
+}
+
+impl From<IndexMap<(i64, i32), MediaRef>> for MediaIndex {
+    fn from(index: IndexMap<(i64, i32), MediaRef>) -> Self {
+        Self(Arc::new(index))
+    }
+}
+
+impl From<MediaIndex> for IndexMap<(i64, i32), MediaRef> {
+    fn from(index: MediaIndex) -> Self {
+        Arc::unwrap_or_clone(index.0)
+    }
+}
+
+impl FromIterator<((i64, i32), MediaRef)> for MediaIndex {
+    fn from_iter<T: IntoIterator<Item = ((i64, i32), MediaRef)>>(iter: T) -> Self {
+        Self(Arc::new(iter.into_iter().collect()))
+    }
+}
 
 /// Avatar `InputPeerPhotoFileLocation` cannot use hash 0 / min.
 /// https://core.telegram.org/api/min
@@ -32,18 +102,36 @@ pub fn fill_zero_peer_photo_hashes(
     peers: &HashMap<i64, crate::peers::CachedPeer>,
 ) {
     for ((chat_id, _), item) in media.iter_mut() {
-        if let Some(peer) = crate::peers::usable_cached_peer(peers, *chat_id) {
-            if let MediaLocation::PeerPhoto { access_hash, .. } = &mut item.location {
-                if *access_hash == 0 {
-                    *access_hash = peer.access_hash;
-                }
+        fill_peer_photo_hash(item, peers, *chat_id);
+    }
+}
+
+/// Repair only the requested entry, without walking the whole media index.
+pub fn fill_zero_peer_photo_hash(
+    media: &mut MediaIndex,
+    peers: &HashMap<i64, crate::peers::CachedPeer>,
+    chat_id: i64,
+    message_id: i32,
+) {
+    if let Some(item) = media.get_mut(&(chat_id, message_id)) {
+        fill_peer_photo_hash(item, peers, chat_id);
+    }
+}
+
+pub fn fill_peer_photo_hash(
+    item: &mut MediaRef,
+    peers: &HashMap<i64, crate::peers::CachedPeer>,
+    chat_id: i64,
+) {
+    if let Some(peer) = crate::peers::usable_cached_peer(peers, chat_id) {
+        if let MediaLocation::PeerPhoto { peer_kind, peer_id, access_hash, .. } = &mut item.location
+            && *peer_kind == peer.kind && *peer_id == peer.id && *access_hash == 0 {
+                *access_hash = peer.access_hash;
             }
-            if let Some(MediaLocation::PeerPhoto { access_hash, .. }) = &mut item.display_location {
-                if *access_hash == 0 {
-                    *access_hash = peer.access_hash;
-                }
+        if let Some(MediaLocation::PeerPhoto { peer_kind, peer_id, access_hash, .. }) = &mut item.display_location
+            && *peer_kind == peer.kind && *peer_id == peer.id && *access_hash == 0 {
+                *access_hash = peer.access_hash;
             }
-        }
     }
 }
 
@@ -291,8 +379,8 @@ pub fn media_for_download(
     match kind {
         MediaDownloadKind::Full => Ok(media.clone()),
         MediaDownloadKind::Display => {
-            if let Some(loc) = &media.display_location {
-                if location_is_getfile_thumb(loc) {
+            if let Some(loc) = &media.display_location
+                && location_is_getfile_thumb(loc) {
                     let mut copy = media.clone();
                     copy.location = loc.clone();
                     copy.file_size = None;
@@ -302,12 +390,11 @@ pub fn media_for_download(
                         .unwrap_or_else(|| format!("{}:display", media.cache_key));
                     return Ok(copy);
                 }
-            }
             Err(MtprotoError::Message("no display size".into()))
         }
         MediaDownloadKind::Thumb => {
-            if let Some(loc) = &media.thumb_location {
-                if location_is_getfile_thumb(loc) {
+            if let Some(loc) = &media.thumb_location
+                && location_is_getfile_thumb(loc) {
                     let mut copy = media.clone();
                     copy.location = loc.clone();
                     copy.file_size = None;
@@ -317,7 +404,6 @@ pub fn media_for_download(
                         .unwrap_or_else(|| media.cache_key.clone());
                     return Ok(copy);
                 }
-            }
             // Only size is already a getFile photo thumb (`m`/`x`/…); not a full document.
             if location_is_getfile_thumb(&media.location) {
                 return Ok(media.clone());

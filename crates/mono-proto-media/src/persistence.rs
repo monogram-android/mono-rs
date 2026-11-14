@@ -23,6 +23,28 @@ pub fn media_order_from_index(index: &MediaIndex) -> Vec<String> {
         .collect()
 }
 
+/// Project the stored entries and their order together with one key formatting pass.
+pub fn media_and_order_from_index(index: &MediaIndex) -> (HashMap<String, MediaRef>, Vec<String>) {
+    let mut entries = HashMap::with_capacity(index.len());
+    let mut order = Vec::with_capacity(index.len());
+    for ((chat, message), media) in index {
+        if let Some(stored) = crate::media::persisted_media_entry(*message, media) {
+            let key = media_key(*chat, *message);
+            order.push(key.clone());
+            entries.insert(key, stored);
+        }
+    }
+    (entries, order)
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/persistence_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/native_bench.rs"]
+mod native_bench;
+
 pub fn media_to_index(map: &HashMap<String, MediaRef>, order: &[String]) -> MediaIndex {
     let mut index = MediaIndex::default();
     let listed: HashSet<&str> = order.iter().map(String::as_str).collect();

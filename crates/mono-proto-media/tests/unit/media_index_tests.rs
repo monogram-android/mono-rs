@@ -1,6 +1,82 @@
 use super::*;
 
 #[test]
+fn resolved_static_avatar_classification_requires_exact_peer_cache_identity() {
+    let mut entry = media_ref_peer_photo(
+        crate::peers::PeerKind::User,
+        7,
+        1,
+        9,
+        2,
+        "avatar:7".into(),
+        false,
+        None,
+    );
+    entry.location = MediaLocation::Photo {
+        id: 9,
+        access_hash: 1,
+        file_reference: vec![1],
+        thumb_size: "x".into(),
+        dc_id: 2,
+    };
+    assert!(matches!(
+        persist_class(&(7, 0), &entry),
+        PersistClass::Avatar
+    ));
+    assert!(matches!(
+        persist_class(&(8, 0), &entry),
+        PersistClass::ZeroDocument
+    ));
+    assert!(matches!(
+        persist_class(&(7, 1), &entry),
+        PersistClass::Message
+    ));
+    entry.cache_key = "avatar:7:unrelated".into();
+    assert!(matches!(
+        persist_class(&(7, 0), &entry),
+        PersistClass::ZeroDocument
+    ));
+    entry.cache_key = "document:7".into();
+    assert!(matches!(
+        persist_class(&(7, 0), &entry),
+        PersistClass::ZeroDocument
+    ));
+}
+
+#[test]
+fn bounding_mixed_classes_preserves_values_and_global_fifo_order() {
+    let avatar = media_ref_peer_photo(
+        crate::peers::PeerKind::User, 7, 1, 9, 2, "avatar:7".into(), false, None,
+    );
+    let mut document = avatar.clone();
+    document.cache_key = "document:7".into();
+    document.location = MediaLocation::Inline { bytes: vec![1, 2, 3], extension: "jpg".into() };
+    let mut mixed = MediaIndex::default();
+    for n in 1..=1100 {
+        mixed.insert((n, 0), document.clone());
+        mixed.insert((n, 1), document.clone());
+        mixed.insert((n, INSTANT_VIEW_MEDIA_MSG), document.clone());
+        mixed.insert((n + 10000, 0), avatar.clone());
+    }
+    // Replacing an existing entry must not promote its FIFO position.
+    mixed.insert((1, 1), document);
+    let mut reference = mixed.clone();
+    for class in [PersistClass::Message, PersistClass::ZeroDocument, PersistClass::Instant] {
+        let cap = class_cap(class).unwrap();
+        let keys: Vec<_> = reference.iter()
+            .filter(|(key, value)| persist_class(key, value) == class)
+            .map(|(key, _)| *key).collect();
+        let overflow = keys.len().saturating_sub(cap);
+        for key in keys.into_iter().take(overflow) { reference.shift_remove(&key); }
+    }
+    bound_media_index(&mut mixed);
+    assert_eq!(mixed.len(), 1100 + MESSAGE_MEDIA_CAP + ZERO_ID_DOCUMENT_CAP + INSTANT_VIEW_CAP);
+    assert_eq!(mixed.iter().collect::<Vec<_>>(), reference.iter().collect::<Vec<_>>());
+    bound_media_index(&mut mixed);
+    assert_eq!(mixed.iter().collect::<Vec<_>>(), reference.iter().collect::<Vec<_>>());
+}
+
+#[test]
 fn classify_document_kinds() {
     assert_eq!(
         classify_document("application/x-tgsticker", true, true, false),

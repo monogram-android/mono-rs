@@ -50,7 +50,9 @@ pub fn fill_unsupported_rich_text(
             continue;
         }
         remaining -= 1;
-        if let Ok(Some(text)) = fetch_rich_plain(snapshot, api_id, peers, user_id, dto.chat_id, dto.id) {
+        if let Ok(Some(text)) =
+            fetch_rich_plain(snapshot, api_id, peers, user_id, dto.chat_id, dto.id)
+        {
             dto.text = Some(text);
             dto.media_kind = None;
         }

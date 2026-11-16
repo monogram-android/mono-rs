@@ -50,26 +50,29 @@ pub fn cache_from_users_chats(
                 u.min.is_some(),
             );
             if u.min.is_none()
-                && u.photo.as_deref().is_none_or(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_)))
+                && u.photo
+                    .as_deref()
+                    .is_none_or(|photo| matches!(photo, UserProfilePhoto::UserProfilePhotoEmpty(_)))
             {
                 media_index.remove(&(chat_id, 0));
             }
             if let Some(photo) = u.photo.as_ref()
                 && let UserProfilePhoto::UserProfilePhoto(p) = photo.as_ref()
-                    && let Some(hash) = u.access_hash.filter(|&h| h != 0)
-                        && (u.min.is_none() || !media_index.contains_key(&(chat_id, 0))) {
-                            index_dialog_avatar(
-                                media_index,
-                                chat_id,
-                                PeerKind::User,
-                                u.id,
-                                hash,
-                                p.photo_id,
-                                p.dc_id,
-                                p.has_video.is_some(),
-                                p.stripped_thumb.as_deref(),
-                            );
-                        }
+                && let Some(hash) = u.access_hash.filter(|&h| h != 0)
+                && (u.min.is_none() || !media_index.contains_key(&(chat_id, 0)))
+            {
+                index_dialog_avatar(
+                    media_index,
+                    chat_id,
+                    PeerKind::User,
+                    u.id,
+                    hash,
+                    p.photo_id,
+                    p.dc_id,
+                    p.has_video.is_some(),
+                    p.stripped_thumb.as_deref(),
+                );
+            }
         }
     }
     for chat in chats {
@@ -109,19 +112,20 @@ pub fn cache_from_users_chats(
                 }
                 if let ChatPhoto::ChatPhoto(p) = &*c.photo
                     && let Some(hash) = c.access_hash.filter(|&h| h != 0)
-                        && (c.min.is_none() || !media_index.contains_key(&(chat_id, 0))) {
-                            index_dialog_avatar(
-                                media_index,
-                                chat_id,
-                                PeerKind::Channel,
-                                c.id,
-                                hash,
-                                p.photo_id,
-                                p.dc_id,
-                                p.has_video.is_some(),
-                                p.stripped_thumb.as_deref(),
-                            );
-                        }
+                    && (c.min.is_none() || !media_index.contains_key(&(chat_id, 0)))
+                {
+                    index_dialog_avatar(
+                        media_index,
+                        chat_id,
+                        PeerKind::Channel,
+                        c.id,
+                        hash,
+                        p.photo_id,
+                        p.dc_id,
+                        p.has_video.is_some(),
+                        p.stripped_thumb.as_deref(),
+                    );
+                }
             }
             _ => {}
         }
@@ -167,6 +171,8 @@ pub struct ChatMeta {
     pub can_forward: bool,
     pub can_delete_others: bool,
     pub can_manage_topics: bool,
+    /// `channel.autotranslation`: the channel asks clients to auto-translate.
+    pub autotranslation: bool,
 }
 
 pub fn user_chat_meta(title: impl Into<crate::CompactString>) -> ChatMeta {
@@ -182,6 +188,7 @@ pub fn user_chat_meta(title: impl Into<crate::CompactString>) -> ChatMeta {
         can_forward: true,
         can_delete_others: false,
         can_manage_topics: false,
+        autotranslation: false,
     }
 }
 
@@ -210,6 +217,7 @@ pub fn title_for_peer(
             can_forward: true,
             can_delete_others: false,
             can_manage_topics: false,
+            autotranslation: false,
         }),
         Peer::PeerChannel(c) => chats
             .get(&c.channel_id)
@@ -226,6 +234,7 @@ pub fn title_for_peer(
                 can_forward: true,
                 can_delete_others: false,
                 can_manage_topics: false,
+                autotranslation: false,
             }),
         _ => user_chat_meta(crate::CompactString::from("Chat")),
     }
@@ -322,6 +331,7 @@ pub fn chat_meta_from_tl(chat: &TlChat) -> Option<(i64, ChatMeta)> {
                     can_delete_others,
                     can_manage_topics: c.creator.is_some()
                         || admin_can_manage_topics(c.admin_rights.as_deref()),
+                    autotranslation: false,
                 },
             ))
         }
@@ -366,6 +376,7 @@ pub fn chat_meta_from_tl(chat: &TlChat) -> Option<(i64, ChatMeta)> {
                     can_delete_others,
                     can_manage_topics: c.creator.is_some()
                         || admin_can_manage_topics(c.admin_rights.as_deref()),
+                    autotranslation: c.autotranslation.is_some(),
                 },
             ))
         }
@@ -383,6 +394,7 @@ pub fn chat_meta_from_tl(chat: &TlChat) -> Option<(i64, ChatMeta)> {
                 can_forward: false,
                 can_delete_others: false,
                 can_manage_topics: false,
+                autotranslation: false,
             },
         )),
         TlChat::ChannelForbidden(c) => Some((
@@ -399,6 +411,7 @@ pub fn chat_meta_from_tl(chat: &TlChat) -> Option<(i64, ChatMeta)> {
                 can_forward: false,
                 can_delete_others: false,
                 can_manage_topics: false,
+                autotranslation: false,
             },
         )),
         _ => None,

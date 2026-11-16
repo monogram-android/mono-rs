@@ -8,7 +8,8 @@ use crate::{HashMap, HashMapExt};
 use mono_proto::latest::api::{
     ChannelsDeleteMessagesRequest, InputChannel, InputChannelConstructor, InputMedia,
     InputMediaWebPageConstructor, MessagesAffectedMessages, MessagesDeleteMessagesRequest,
-    MessagesEditMessageRequest, MessagesForwardMessagesRequest, MessagesSendMediaRequest, True, TrueConstructor, Updates, Vector, VectorConstructor,
+    MessagesEditMessageRequest, MessagesForwardMessagesRequest, MessagesSendMediaRequest, True,
+    TrueConstructor, Updates, Vector, VectorConstructor,
 };
 use mono_proto_session::Snapshot;
 
@@ -143,9 +144,9 @@ pub fn send_text_with_options(
     );
     if let Ok(ref result) = mapped
         && let Some(ack) = crate::messages_send_result::implicit_ack(&updates, result, outgoing_id)
-        {
-            crate::rpc::enqueue_response(snapshot.dc_id, &ack)?;
-        }
+    {
+        crate::rpc::enqueue_response(snapshot.dc_id, &ack)?;
+    }
     crate::rpc::enqueue_response(snapshot.dc_id, &updates)?;
     let mut result = mapped?;
     let dto = match &mut result {
@@ -358,6 +359,8 @@ pub fn first_new_from_short(updates: Updates, chat_id: i64) -> Option<MessageDto
             reply_markup_json: None,
             forum_topic: false,
             sender_photo_cache_key: None,
+
+            summary_from_language: None,
         }),
         _ => None,
     }

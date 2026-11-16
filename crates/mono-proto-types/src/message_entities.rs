@@ -19,6 +19,9 @@ struct WireEntity {
     offset: i32,
     length: i32,
     url: Option<String>,
+    /// `messageEntityDiffReplace.old_text`; only used by AI proofread diffs.
+    #[serde(default)]
+    text: Option<String>,
 }
 
 pub fn input_entities_from_json(
@@ -180,6 +183,26 @@ fn wire_entity(entity: WireEntity) -> Option<MessageEntity> {
                 },
             )
         }
+        // AI proofread diffs: <https://core.telegram.org/api/ai>.
+        "diff_insert" => {
+            MessageEntity::MessageEntityDiffInsert(tl::MessageEntityDiffInsertConstructor {
+                offset,
+                length,
+            })
+        }
+        "diff_replace" => {
+            MessageEntity::MessageEntityDiffReplace(tl::MessageEntityDiffReplaceConstructor {
+                offset,
+                length,
+                old_text: entity.text.unwrap_or_default(),
+            })
+        }
+        "diff_delete" => {
+            MessageEntity::MessageEntityDiffDelete(tl::MessageEntityDiffDeleteConstructor {
+                offset,
+                length,
+            })
+        }
         _ => return None,
     })
 }
@@ -195,6 +218,9 @@ pub struct EntityJson {
     length: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     url: Option<String>,
+    /// `messageEntityDiffReplace.old_text` (AI proofread diff only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
 }
 
 pub fn entity_json(kind: &str, offset: i32, length: i32, url: Option<String>) -> EntityJson {
@@ -203,6 +229,23 @@ pub fn entity_json(kind: &str, offset: i32, length: i32, url: Option<String>) ->
         offset,
         length,
         url,
+        text: None,
+    }
+}
+
+pub fn entity_json_text(
+    kind: &str,
+    offset: i32,
+    length: i32,
+    url: Option<String>,
+    text: Option<String>,
+) -> EntityJson {
+    EntityJson {
+        kind: kind.to_string(),
+        offset,
+        length,
+        url,
+        text,
     }
 }
 
@@ -278,6 +321,20 @@ pub fn entities_to_json(entities: Option<&Vector<Box<MessageEntity>>>) -> Option
             )),
             MessageEntity::MessageEntityFormattedDate(e) => {
                 Some(entity_json("date", e.offset, e.length, None))
+            }
+            // AI proofread diffs: `<https://core.telegram.org/api/ai>`.
+            MessageEntity::MessageEntityDiffInsert(e) => {
+                Some(entity_json("diff_insert", e.offset, e.length, None))
+            }
+            MessageEntity::MessageEntityDiffReplace(e) => Some(entity_json_text(
+                "diff_replace",
+                e.offset,
+                e.length,
+                None,
+                Some(e.old_text.clone()),
+            )),
+            MessageEntity::MessageEntityDiffDelete(e) => {
+                Some(entity_json("diff_delete", e.offset, e.length, None))
             }
             _ => None,
         })

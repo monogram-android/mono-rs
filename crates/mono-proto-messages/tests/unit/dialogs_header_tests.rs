@@ -45,6 +45,8 @@ fn dto(id: i32, text: &str, reply_to: Option<i32>, quote: Option<&str>) -> Messa
         reply_markup_json: None,
         forum_topic: false,
         sender_photo_cache_key: None,
+
+        summary_from_language: None,
     }
 }
 
@@ -221,7 +223,9 @@ fn photo_slot(cache_key: &str) -> crate::media::MediaRef {
         display_location: None,
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None, refresh_source: None, webpage_id: None,
+        source_url: None,
+        refresh_source: None,
+        webpage_id: None,
     }
 }
 

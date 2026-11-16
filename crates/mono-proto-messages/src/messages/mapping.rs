@@ -51,6 +51,8 @@ pub fn message_from_updates(
             reply_markup_json: None,
             forum_topic: false,
             sender_photo_cache_key: None,
+
+            summary_from_language: None,
         }),
         Updates::UpdateShortMessage(m) => {
             let (reply_to_msg_id, reply_to_top_id, reply_quote, reply_quote_entities_json, _) =
@@ -99,6 +101,8 @@ pub fn message_from_updates(
                 reply_markup_json: None,
                 forum_topic: false,
                 sender_photo_cache_key: None,
+
+                summary_from_language: None,
             })
         }
         Updates::UpdateShortChatMessage(m) => {
@@ -148,6 +152,8 @@ pub fn message_from_updates(
                 reply_markup_json: None,
                 forum_topic: false,
                 sender_photo_cache_key: None,
+
+                summary_from_language: None,
             })
         }
         _ => None,
@@ -189,6 +195,8 @@ pub fn message_from_updates(
         reply_markup_json: None,
         forum_topic: false,
         sender_photo_cache_key: None,
+
+        summary_from_language: None,
     })
 }
 

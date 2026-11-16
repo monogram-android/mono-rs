@@ -46,6 +46,13 @@ pub struct ChatDto {
     pub unread_reactions_count: i32,
     /// Creator or `manage_topics` admin right.
     pub can_manage_topics: bool,
+    /// `chatFull`/`channelFull.translations_disabled`: the peer opted out of
+    /// text translation (<https://core.telegram.org/api/translation>).
+    #[serde(default)]
+    pub translations_disabled: bool,
+    /// `channel.autotranslation`: the channel asks clients to auto-translate.
+    #[serde(default)]
+    pub autotranslation: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -93,4 +100,8 @@ pub struct MessageDto {
     /// `None` means the cached record predates media privacy metadata.
     #[serde(default)]
     pub media_preview_restricted: Option<bool>,
+    /// `message.summary_from_language`: set by the server when the message is
+    /// summarizable (<https://core.telegram.org/api/ai>).
+    #[serde(default)]
+    pub summary_from_language: Option<String>,
 }

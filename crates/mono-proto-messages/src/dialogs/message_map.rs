@@ -153,6 +153,8 @@ pub fn message_to_dto_named(
                     media_index,
                     m.from_id.as_ref().map(|peer| peer_chat_id(peer)),
                 ),
+
+                summary_from_language: m.summary_from_language.clone(),
             })
         }
         Message::MessageService(m) => {
@@ -203,6 +205,8 @@ pub fn message_to_dto_named(
                 reply_markup_json: None,
                 forum_topic,
                 sender_photo_cache_key: sender_photo_cache_key(media_index, sender_id),
+
+                summary_from_language: None,
             })
         }
         _ => None,

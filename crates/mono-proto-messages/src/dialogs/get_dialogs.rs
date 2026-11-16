@@ -95,7 +95,9 @@ pub fn get_dialogs(
         chats,
         users,
     );
-    if offset_date == 0 && offset_id == 0 && offset_peer_id == 0
+    if offset_date == 0
+        && offset_id == 0
+        && offset_peer_id == 0
         && let Ok(pinned) = fetch_pinned_dialogs(
             snapshot,
             api_id,
@@ -103,9 +105,10 @@ pub fn get_dialogs(
             media_index,
             channel_pts,
             folder_id.unwrap_or(0),
-        ) {
-            out = merge_pinned_prefix(pinned, out);
-        }
+        )
+    {
+        out = merge_pinned_prefix(pinned, out);
+    }
     Ok(out)
 }
 
@@ -174,8 +177,12 @@ pub fn map_peer_dialogs(
             if u.verified.is_some() {
                 verified_ids.insert(chat_id);
             }
-            if u.min.is_none() { known_photos.insert(chat_id); }
-            let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
+            if u.min.is_none() {
+                known_photos.insert(chat_id);
+            }
+            let photo_key = media_index
+                .get(&(chat_id, 0))
+                .map(|media| media.cache_key.clone());
             let (peer_status, peer_status_at) =
                 user_status_parts(u.status.as_ref().map(|s| s.as_ref()));
             extras.insert(
@@ -193,18 +200,21 @@ pub fn map_peer_dialogs(
     }
     for chat in &chat_list {
         if super::peers::chat_poll_permission(chat)
-            && let Some((id, meta)) = super::peers::chat_meta_from_tl(chat) {
-                poll_peers.insert(if meta.is_channel || matches!(chat, TlChat::Channel(_)) {
-                    chat_id_for_channel(id)
-                } else {
-                    chat_id_for_chat(id)
-                });
-            }
+            && let Some((id, meta)) = super::peers::chat_meta_from_tl(chat)
+        {
+            poll_peers.insert(if meta.is_channel || matches!(chat, TlChat::Channel(_)) {
+                chat_id_for_channel(id)
+            } else {
+                chat_id_for_chat(id)
+            });
+        }
         match chat {
             TlChat::Chat(c) => {
                 let chat_id = chat_id_for_chat(c.id);
                 known_photos.insert(chat_id);
-                let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
+                let photo_key = media_index
+                    .get(&(chat_id, 0))
+                    .map(|media| media.cache_key.clone());
                 extras.insert(chat_id, (false, false, photo_key, None, None, None));
             }
             TlChat::Channel(c) => {
@@ -212,8 +222,12 @@ pub fn map_peer_dialogs(
                 if c.verified.is_some() {
                     verified_ids.insert(chat_id);
                 }
-                if c.min.is_none() && matches!(c.photo.as_ref(), ChatPhoto::ChatPhotoEmpty(_)) { known_photos.insert(chat_id); }
-                let photo_key = media_index.get(&(chat_id, 0)).map(|media| media.cache_key.clone());
+                if c.min.is_none() && matches!(c.photo.as_ref(), ChatPhoto::ChatPhotoEmpty(_)) {
+                    known_photos.insert(chat_id);
+                }
+                let photo_key = media_index
+                    .get(&(chat_id, 0))
+                    .map(|media| media.cache_key.clone());
                 extras.insert(
                     chat_id,
                     (
@@ -331,6 +345,10 @@ pub fn map_peer_dialogs(
             can_manage_topics: meta.can_manage_topics,
             emoji_status_document_id,
             last_message_outgoing: last_outgoing,
+            // Dialogs carry the channel flag only; `translations_disabled`
+            // needs full peer info and is filled on demand.
+            translations_disabled: false,
+            autotranslation: meta.autotranslation,
         });
     }
     out

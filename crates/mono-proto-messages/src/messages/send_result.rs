@@ -1,5 +1,5 @@
-use crate::event_types::OutgoingMessageResult;
 use crate::MtprotoError;
+use crate::event_types::OutgoingMessageResult;
 use mono_proto::latest::api::*;
 
 pub fn send_result(
@@ -126,14 +126,14 @@ pub fn album_send_results(
         for update in crate::peers::vector_boxed_items(items) {
             if let Update::UpdateMessageId(value) = update
                 && ids.contains(&value.random_id)
-                    && (value.id <= 0
-                        || acknowledged.insert(value.random_id, value.id).is_some()
-                        || !message_ids.insert(value.id))
-                {
-                    return Err(MtprotoError::Message(
-                        "ambiguous album acknowledgment".into(),
-                    ));
-                }
+                && (value.id <= 0
+                    || acknowledged.insert(value.random_id, value.id).is_some()
+                    || !message_ids.insert(value.id))
+            {
+                return Err(MtprotoError::Message(
+                    "ambiguous album acknowledgment".into(),
+                ));
+            }
         }
         if acknowledged.len() != requests.len() {
             return Err(MtprotoError::Message(

@@ -80,4 +80,5 @@ pub mod session;
 pub mod session_store;
 pub mod shared_folders;
 pub mod state;
+pub mod text_tools;
 pub mod updates;

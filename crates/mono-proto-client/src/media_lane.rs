@@ -1,7 +1,4 @@
-pub fn split_even_odd_request_indices(
-    offsets: &[i64],
-    chunk: i32,
-) -> (Vec<usize>, Vec<usize>) {
+pub fn split_even_odd_request_indices(offsets: &[i64], chunk: i32) -> (Vec<usize>, Vec<usize>) {
     let step = i64::from(chunk.max(1));
     let mut even = Vec::new();
     let mut odd = Vec::new();
@@ -193,199 +190,257 @@ pub fn download_media_range_on_lane_dc(
     target_dc: i32,
 ) -> Result<String, MtprotoError> {
     loop {
-    let _span = mono_proto_media::perf::span("media_file");
-    let mut io = lock_media_lane(client)?;
-    if !session_lease_valid(&client.data.lock(), home.session_id) {
-        return Err(expired_session_lease());
-    }
-    let mut first_chunk_span = Some(mono_proto_media::perf::span("media_first_chunk"));
-    let already_temp = download_temp_ready(&io, client, target_dc, home.auth_key.as_deref());
-    if !already_temp {
-        match prepare_media_lane_snapshot(&mut io.snapshot, home, target_dc) {
-            MediaLanePrep::NeedExport => {
-                io.snapshot = with_client_mut(handle, |state| {
-                    if !home_lease_ok(state, home.session_id) {
-                        return Err(expired_session_lease());
-                    }
-                    copy_authorization_to_dc(state, target_dc)
-                })?;
-                io.transport = None;
-            }
-            MediaLanePrep::Replaced => io.transport = None,
-            MediaLanePrep::Reuse => {}
-        }
-        crate::bind_temp::ensure_dc_temp_with(client, &mut io, target_dc,
-            Some(home.session_id), &mono_proto_runtime::rpc::SystemClock,
-            crate::bind_temp::negotiate_bound_temp)?;
-    }
-    if target_dc == home.dc_id && io.snapshot.auth_key.as_ref() == home.auth_key.as_ref() {
-        drop(io);
-        return download_media_range_on_home_session(
-            handle,
-            client,
-            home.session_id,
-            api_id,
-            media,
-            dest,
-            offset,
-        );
-    }
-    let staged = stage_for(dest, offset)?;
-    let mut io2 = if should_open_second_media_lane(target_dc, media::download_in_flight()) {
-        try_lock_second_media_lane(client)
-    } else {
-        None
-    };
-    let second_ready = match io2.as_mut() {
-        Some(second) if download_temp_ready(second, client, target_dc, home.auth_key.as_deref()) => {
-            true
-        }
-        _ => false,
-    };
-    if !second_ready {
-        io2 = None;
-    }
-    let mut preparation = if io2.is_none() && offset.is_none()
-        && should_open_second_media_lane(target_dc, media::download_in_flight()) {
-        get_client(handle).ok().map(|worker_client| {
-            let class = scheduler::current_class();
-            let expected_session = home.session_id;
-            MediaLanePreparation::start(move || {
-                let _policy = mono_proto_runtime::transfer_policy::bind(worker_client.policy.clone());
-                scheduler::with_class(class, || {
-                    let _span = mono_proto_media::perf::span("media_second_lane_prepare");
-                    let Some(mut second) = try_lock_second_media_lane(&worker_client) else { return false; };
-                    crate::bind_temp::ensure_dc_temp_with(&worker_client, &mut second, target_dc,
-                        Some(expected_session), &mono_proto_runtime::rpc::SystemClock,
-                        crate::bind_temp::negotiate_bound_temp).is_ok()
-                })
-            })
-        })
-    } else { None };
-    let mut media_snap = io.snapshot.clone();
-    let mut slot = io.transport.take();
-    let mut media_snap2 = io2.as_ref().map(|lane| lane.snapshot.clone());
-    let mut slot2 = io2.as_mut().map(|lane| lane.transport.take());
-    mono_proto_runtime::rpc::clear_new_session_metadata();
-    // Timeout is per window, not the whole file. Streaming idle-extends while parts arrive.
-    let path = {
-        let lane_dc = media_snap.dc_id;
-        media::download_media_range_batched_streaming_capped(
-            lane_dc,
-            media,
-            staged.path(),
-            dest,
-            offset,
-            media::download_in_flight(),
-            None,
-            |_init_first, requests, on_chunk| {
-                media::check_transfer_flood(lane_dc, media::TransferClass::Download)?;
-                if preparation.as_ref().is_some_and(MediaLanePreparation::finished) {
-                    preparation = None;
-                    if should_open_second_media_lane(lane_dc, media::download_in_flight()) {
-                        io2 = try_lock_second_media_lane(client).filter(|lane|
-                            download_temp_ready(lane, client, lane_dc, home.auth_key.as_deref()));
-                        media_snap2 = io2.as_ref().map(|lane| lane.snapshot.clone());
-                        slot2 = io2.as_mut().map(|lane| lane.transport.take());
-                    }
-                }
-                let mut stream_chunk = |index, result: Result<mono_proto::latest::api::UploadFile, MtprotoError>| {
-                    if matches!(&result, Ok(mono_proto::latest::api::UploadFile::UploadFile(file)) if !file.bytes.is_empty()) {
-                        first_chunk_span.take();
-                    }
-                    let refill = on_chunk(index, result);
-                    if preparation.as_ref().is_some_and(MediaLanePreparation::finished) { None } else { refill }
-                };
-                mono_proto_runtime::rpc::with_rpc_timeout_secs(45, || {
-                    invoke_media_batch_even_odd(
-                        client,
-                        &mut media_snap,
-                        &mut slot,
-                        media_snap2.as_mut(),
-                        slot2.as_mut(),
-                        api_id,
-                        requests,
-                        &mut stream_chunk,
-                    )
-                })
-            },
-        )
-    };
-    drop(preparation);
-    io.snapshot = media_snap.clone();
-    let mut temporary = path.as_ref().err().is_some_and(|error| expire_temporary_lane(client, &mut io, error));
-    // FILE_REFERENCE / transport errors must not park this TCP for the next file.
-    io.transport = if path.is_ok() { slot } else { None };
-    if let Some(second) = io2.as_mut() {
-        if let Some(snap2) = media_snap2 {
-            second.snapshot = snap2;
-        }
-        second.transport = if path.is_ok() { slot2.flatten() } else { None };
-        if let Err(error) = &path {
-            temporary |= expire_temporary_lane(client, second, error);
-        }
-    }
-    drop(io);
-    drop(io2);
-    if !temporary && path.as_ref().err().is_some_and(|error| mark_lane_session_dead(client, home.session_id, error)) {
-        let _ = persist_updates_data(client, home.session_id);
-    }
-    if path.as_ref().err().is_some_and(media::optional_paused) {
-        staged.keep();
-        while media::should_pause_optional(Some(media::DownloadProfile::Background)) {
-            if media::download_cancelled(dest) || mono_proto_runtime::request_control::check().is_err() {
-                return Err(MtprotoError::Message("cancelled".into()));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        continue;
-    }
-    if let Ok(client) = get_client(handle) {
-        schedule_file_cleanup(&client);
-    }
-    let new_session = mono_proto_runtime::rpc::take_new_session_metadata();
-    if media_snap.dc_id == home.dc_id && media_snap.auth_key == home.auth_key {
-        let mut d = client.data.lock();
-        if !session_lease_valid(&d, home.session_id) {
+        let _span = mono_proto_media::perf::span("media_file");
+        let mut io = lock_media_lane(client)?;
+        if !session_lease_valid(&client.data.lock(), home.session_id) {
             return Err(expired_session_lease());
         }
-        d.home_salt = media_snap.server_salt;
-        d.home_time_offset = media_snap.time_offset_micros;
-        if new_session.is_some() {
-            d.new_session = new_session.clone();
-        }
-    }
-    if new_session.is_some() {
-        persist_updates_data(client, home.session_id)?;
-    }
-    if let Err(ref err) = path {
-        let foreign_key = !temporary && target_dc != home.dc_id
-            && !(media_snap.dc_id == home.dc_id && media_snap.auth_key == home.auth_key)
-            && is_foreign_auth_key_failure(err);
-        if foreign_key && !DC_AUTH_RETRY.with(std::cell::Cell::get) {
-            let _retry = DcAuthRetry::enter();
-            let _ = with_client_mut(handle, |state| {
-                if home_lease_ok(state, home.session_id) {
-                    state.dc_auth_keys.remove(&target_dc);
+        let mut first_chunk_span = Some(mono_proto_media::perf::span("media_first_chunk"));
+        let already_temp = download_temp_ready(&io, client, target_dc, home.auth_key.as_deref());
+        if !already_temp {
+            match prepare_media_lane_snapshot(&mut io.snapshot, home, target_dc) {
+                MediaLanePrep::NeedExport => {
+                    io.snapshot = with_client_mut(handle, |state| {
+                        if !home_lease_ok(state, home.session_id) {
+                            return Err(expired_session_lease());
+                        }
+                        copy_authorization_to_dc(state, target_dc)
+                    })?;
+                    io.transport = None;
                 }
-                Ok(())
-            });
-            client.data.lock().dc_temp_auth.remove(&target_dc);
-            for lane in client.media.iter() {
-                if let Some(mut lane_io) = lane.io.try_lock()
-                    && lane_io.snapshot.dc_id == target_dc {
+                MediaLanePrep::Replaced => io.transport = None,
+                MediaLanePrep::Reuse => {}
+            }
+            crate::bind_temp::ensure_dc_temp_with(
+                client,
+                &mut io,
+                target_dc,
+                Some(home.session_id),
+                &mono_proto_runtime::rpc::SystemClock,
+                crate::bind_temp::negotiate_bound_temp,
+            )?;
+        }
+        if target_dc == home.dc_id && io.snapshot.auth_key.as_ref() == home.auth_key.as_ref() {
+            drop(io);
+            return download_media_range_on_home_session(
+                handle,
+                client,
+                home.session_id,
+                api_id,
+                media,
+                dest,
+                offset,
+            );
+        }
+        let staged = stage_for(dest, offset)?;
+        let mut io2 = if should_open_second_media_lane(target_dc, media::download_in_flight()) {
+            try_lock_second_media_lane(client)
+        } else {
+            None
+        };
+        let second_ready = match io2.as_mut() {
+            Some(second)
+                if download_temp_ready(second, client, target_dc, home.auth_key.as_deref()) =>
+            {
+                true
+            }
+            _ => false,
+        };
+        if !second_ready {
+            io2 = None;
+        }
+        let mut preparation = if io2.is_none()
+            && offset.is_none()
+            && should_open_second_media_lane(target_dc, media::download_in_flight())
+        {
+            get_client(handle).ok().map(|worker_client| {
+                let class = scheduler::current_class();
+                let expected_session = home.session_id;
+                MediaLanePreparation::start(move || {
+                    let _policy =
+                        mono_proto_runtime::transfer_policy::bind(worker_client.policy.clone());
+                    scheduler::with_class(class, || {
+                        let _span = mono_proto_media::perf::span("media_second_lane_prepare");
+                        let Some(mut second) = try_lock_second_media_lane(&worker_client) else {
+                            return false;
+                        };
+                        crate::bind_temp::ensure_dc_temp_with(
+                            &worker_client,
+                            &mut second,
+                            target_dc,
+                            Some(expected_session),
+                            &mono_proto_runtime::rpc::SystemClock,
+                            crate::bind_temp::negotiate_bound_temp,
+                        )
+                        .is_ok()
+                    })
+                })
+            })
+        } else {
+            None
+        };
+        let mut media_snap = io.snapshot.clone();
+        let mut slot = io.transport.take();
+        let mut media_snap2 = io2.as_ref().map(|lane| lane.snapshot.clone());
+        let mut slot2 = io2.as_mut().map(|lane| lane.transport.take());
+        mono_proto_runtime::rpc::clear_new_session_metadata();
+        // Timeout is per window, not the whole file. Streaming idle-extends while parts arrive.
+        let path = {
+            let lane_dc = media_snap.dc_id;
+            media::download_media_range_batched_streaming_capped(
+                lane_dc,
+                media,
+                staged.path(),
+                dest,
+                offset,
+                media::download_in_flight(),
+                None,
+                |_init_first, requests, on_chunk| {
+                    media::check_transfer_flood(lane_dc, media::TransferClass::Download)?;
+                    if preparation
+                        .as_ref()
+                        .is_some_and(MediaLanePreparation::finished)
+                    {
+                        preparation = None;
+                        if should_open_second_media_lane(lane_dc, media::download_in_flight()) {
+                            io2 = try_lock_second_media_lane(client).filter(|lane| {
+                                download_temp_ready(lane, client, lane_dc, home.auth_key.as_deref())
+                            });
+                            media_snap2 = io2.as_ref().map(|lane| lane.snapshot.clone());
+                            slot2 = io2.as_mut().map(|lane| lane.transport.take());
+                        }
+                    }
+                    let mut stream_chunk = |index,
+                                            result: Result<
+                        mono_proto::latest::api::UploadFile,
+                        MtprotoError,
+                    >| {
+                        if matches!(&result, Ok(mono_proto::latest::api::UploadFile::UploadFile(file)) if !file.bytes.is_empty())
+                        {
+                            first_chunk_span.take();
+                        }
+                        let refill = on_chunk(index, result);
+                        if preparation
+                            .as_ref()
+                            .is_some_and(MediaLanePreparation::finished)
+                        {
+                            None
+                        } else {
+                            refill
+                        }
+                    };
+                    mono_proto_runtime::rpc::with_rpc_timeout_secs(45, || {
+                        invoke_media_batch_even_odd(
+                            client,
+                            &mut media_snap,
+                            &mut slot,
+                            media_snap2.as_mut(),
+                            slot2.as_mut(),
+                            api_id,
+                            requests,
+                            &mut stream_chunk,
+                        )
+                    })
+                },
+            )
+        };
+        drop(preparation);
+        io.snapshot = media_snap.clone();
+        let mut temporary = path
+            .as_ref()
+            .err()
+            .is_some_and(|error| expire_temporary_lane(client, &mut io, error));
+        // FILE_REFERENCE / transport errors must not park this TCP for the next file.
+        io.transport = if path.is_ok() { slot } else { None };
+        if let Some(second) = io2.as_mut() {
+            if let Some(snap2) = media_snap2 {
+                second.snapshot = snap2;
+            }
+            second.transport = if path.is_ok() { slot2.flatten() } else { None };
+            if let Err(error) = &path {
+                temporary |= expire_temporary_lane(client, second, error);
+            }
+        }
+        drop(io);
+        drop(io2);
+        if !temporary
+            && path
+                .as_ref()
+                .err()
+                .is_some_and(|error| mark_lane_session_dead(client, home.session_id, error))
+        {
+            let _ = persist_updates_data(client, home.session_id);
+        }
+        if path.as_ref().err().is_some_and(media::optional_paused) {
+            staged.keep();
+            while media::should_pause_optional(Some(media::DownloadProfile::Background)) {
+                if media::download_cancelled(dest)
+                    || mono_proto_runtime::request_control::check().is_err()
+                {
+                    return Err(MtprotoError::Message("cancelled".into()));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            continue;
+        }
+        if let Ok(client) = get_client(handle) {
+            schedule_file_cleanup(&client);
+        }
+        let new_session = mono_proto_runtime::rpc::take_new_session_metadata();
+        if media_snap.dc_id == home.dc_id && media_snap.auth_key == home.auth_key {
+            let mut d = client.data.lock();
+            if !session_lease_valid(&d, home.session_id) {
+                return Err(expired_session_lease());
+            }
+            d.home_salt = media_snap.server_salt;
+            d.home_time_offset = media_snap.time_offset_micros;
+            if new_session.is_some() {
+                d.new_session = new_session.clone();
+            }
+        }
+        if new_session.is_some() {
+            persist_updates_data(client, home.session_id)?;
+        }
+        if let Err(ref err) = path {
+            let foreign_key = !temporary
+                && target_dc != home.dc_id
+                && !(media_snap.dc_id == home.dc_id && media_snap.auth_key == home.auth_key)
+                && is_foreign_auth_key_failure(err);
+            if foreign_key && !DC_AUTH_RETRY.with(std::cell::Cell::get) {
+                let _retry = DcAuthRetry::enter();
+                let _ = with_client_mut(handle, |state| {
+                    if home_lease_ok(state, home.session_id) {
+                        state.dc_auth_keys.remove(&target_dc);
+                    }
+                    Ok(())
+                });
+                client.data.lock().dc_temp_auth.remove(&target_dc);
+                for lane in client.media.iter() {
+                    if let Some(mut lane_io) = lane.io.try_lock()
+                        && lane_io.snapshot.dc_id == target_dc
+                    {
                         lane_io.temp_expires_at = 0;
                         lane_io.perm_key = None;
                         lane_io.transport = None;
                     }
+                }
+                staged.keep();
+                return download_media_range_on_lane_dc(
+                    handle, client, home, api_id, media, dest, offset, target_dc,
+                );
             }
-            staged.keep();
-            return download_media_range_on_lane_dc(
-                handle, client, home, api_id, media, dest, offset, target_dc,
-            );
         }
-    }
-    return finish_staged(staged, if temporary { Err(temporary_key_retry_error()) } else { path }, client, home.session_id, dest);
+        return finish_staged(
+            staged,
+            if temporary {
+                Err(temporary_key_retry_error())
+            } else {
+                path
+            },
+            client,
+            home.session_id,
+            dest,
+        );
     }
 }
 
@@ -420,7 +475,9 @@ fn follow_cdn_redirect(
     job: &media::CdnRedirect,
 ) -> Result<String, MtprotoError> {
     if job.offset != 0 {
-        return Err(MtprotoError::Message("CDN resume requires origin download".into()));
+        return Err(MtprotoError::Message(
+            "CDN resume requires origin download".into(),
+        ));
     }
     let client = get_client(handle)?;
     let session_id = client.data.lock().home_session_id;
@@ -460,25 +517,35 @@ fn follow_cdn_redirect(
         conn,
         framing,
         input: Vec::new(),
+        recv_buf: vec![0_u8; 64 * 1024],
         last_io: std::time::Instant::now(),
     });
     let staged = media::StagedDownload::new(dest)?;
     mono_proto_runtime::rpc::with_live_transport(&mut slot, || {
         mono_proto_runtime::rpc::with_rpc_timeout_secs(45, || {
-            receive_cdn_parts(job, dest, &staged, |offset| {
-                let response: UploadCdnFile = api_invoke::invoke_api_without_updates(
-                    &mut snap, api_id,
-                    media::get_cdn_file_request(job.file_token.clone(), offset, media::CHUNK),
-                )?;
-                media::cdn_file_bytes(response)
-            }, |request_token| {
-                with_client_mut(handle, |state| {
-                    api_invoke::invoke_api::<_, Vector<Box<FileHash>>>(
-                        &mut state.snapshot, api_id,
-                        media::reupload_cdn_file_request(job.file_token.clone(), request_token),
-                    )
-                }).map(|_| ())
-            })
+            receive_cdn_parts(
+                job,
+                dest,
+                &staged,
+                |offset| {
+                    let response: UploadCdnFile = api_invoke::invoke_api_without_updates(
+                        &mut snap,
+                        api_id,
+                        media::get_cdn_file_request(job.file_token.clone(), offset, media::CHUNK),
+                    )?;
+                    media::cdn_file_bytes(response)
+                },
+                |request_token| {
+                    with_client_mut(handle, |state| {
+                        api_invoke::invoke_api::<_, Vector<Box<FileHash>>>(
+                            &mut state.snapshot,
+                            api_id,
+                            media::reupload_cdn_file_request(job.file_token.clone(), request_token),
+                        )
+                    })
+                    .map(|_| ())
+                },
+            )
         })
     })?;
     publish_media(&client, session_id, staged, dest)?;
@@ -503,16 +570,19 @@ fn receive_cdn_parts(
     mut reupload: impl FnMut(Vec<u8>) -> Result<(), MtprotoError>,
 ) -> Result<(), MtprotoError> {
     use std::io::{Seek, SeekFrom, Write};
-    let mut out = std::fs::File::create(staged.path())
-        .map_err(|e| MtprotoError::Message(e.to_string()))?;
+    let mut out =
+        std::fs::File::create(staged.path()).map_err(|e| MtprotoError::Message(e.to_string()))?;
     let mut offset = job.offset;
     loop {
-        if media::download_cancelled(dest) || mono_proto_runtime::request_control::check().is_err() {
+        if media::download_cancelled(dest) || mono_proto_runtime::request_control::check().is_err()
+        {
             return Err(MtprotoError::Message("cancelled".into()));
         }
         let mut reuploads = 0;
         let mut part = loop {
-            if media::download_cancelled(dest) || mono_proto_runtime::request_control::check().is_err() {
+            if media::download_cancelled(dest)
+                || mono_proto_runtime::request_control::check().is_err()
+            {
                 return Err(MtprotoError::Message("cancelled".into()));
             }
             match fetch(offset)? {
@@ -526,7 +596,8 @@ fn receive_cdn_parts(
                 }
             }
         };
-        if media::download_cancelled(dest) || mono_proto_runtime::request_control::check().is_err() {
+        if media::download_cancelled(dest) || mono_proto_runtime::request_control::check().is_err()
+        {
             return Err(MtprotoError::Message("cancelled".into()));
         }
         media::decrypt_cdn_part(&job.encryption_key, &job.encryption_iv, offset, &mut part)?;
@@ -537,11 +608,14 @@ fn receive_cdn_parts(
         }
         out.seek(SeekFrom::Start(offset as u64))
             .map_err(|e| MtprotoError::Message(e.to_string()))?;
-        out.write_all(&part).map_err(|e| MtprotoError::Message(e.to_string()))?;
-        if part.len() < media::CHUNK as usize { break; }
+        out.write_all(&part)
+            .map_err(|e| MtprotoError::Message(e.to_string()))?;
+        if part.len() < media::CHUNK as usize {
+            break;
+        }
         offset += part.len() as i64;
         media::notify_progress(&dest.display().to_string(), offset, 0);
     }
-    out.flush().map_err(|e| MtprotoError::Message(e.to_string()))
+    out.flush()
+        .map_err(|e| MtprotoError::Message(e.to_string()))
 }
-

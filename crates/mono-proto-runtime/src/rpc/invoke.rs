@@ -541,11 +541,17 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
     LAST_INBOUND_CTOR.with(|c| c.set(0));
     let mut sent_for_clock = std::collections::BTreeMap::new();
     let mut pending: Vec<Option<RequestHandle<Vec<u8>>>> = Vec::with_capacity(bodies.len());
-    for body in bodies {
+    let mut active_indices = Vec::with_capacity(bodies.len());
+    let mut ids = Vec::with_capacity(bodies.len());
+    let mut pending_ids = std::collections::HashSet::with_capacity(bodies.len());
+    for (index, body) in bodies.iter().enumerate() {
         let method = RawMethod { body: body.clone() };
         let handle = engine
             .invoke(&method, clock)
             .map_err(|e| MtprotoError::Message(e.to_string()))?;
+        ids.push(handle.message_id());
+        pending_ids.insert(handle.message_id());
+        active_indices.push(index);
         pending.push(Some(handle));
     }
     let mut silent = super::main_policy::SilentRequests::new(
@@ -569,12 +575,6 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
         transport.last_io = std::time::Instant::now();
     }
     loop {
-        let ids: Vec<i64> = pending
-            .iter()
-            .flatten()
-            .map(|handle| handle.message_id())
-            .collect();
-        sent_for_clock.retain(|id, _| ids.contains(id));
         check_silent_requests(
             engine,
             transport,
@@ -633,11 +633,7 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
                     .map_err(|e| MtprotoError::Message(e.to_string()))?;
                 *send_started = true;
                 send_framed(&mut transport.conn, &mut transport.framing, &sealed)?;
-                if pending
-                    .iter()
-                    .flatten()
-                    .any(|h| h.message_id() == outbound.message_id)
-                {
+                if pending_ids.contains(&outbound.message_id) {
                     sent_for_clock
                         .entry(outbound.message_id)
                         .or_insert_with(std::time::Instant::now);
@@ -647,15 +643,15 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
 
             let mut complete = true;
             let mut refills: Vec<Vec<u8>> = Vec::new();
-            for (index, slot) in pending.iter_mut().enumerate() {
-                if results[index].is_some() {
-                    continue;
-                }
-                let Some(handle) = slot.as_ref() else {
+            let mut cursor = 0;
+            while cursor < active_indices.len() {
+                let index = active_indices[cursor];
+                let Some(handle) = pending[index].as_ref().cloned() else {
+                    active_indices.swap_remove(cursor);
                     continue;
                 };
                 if let Some(response) = engine
-                    .take_response::<RawMethod>(handle)
+                    .take_response::<RawMethod>(&handle)
                     .map_err(|e| MtprotoError::Message(e.to_string()))?
                 {
                     let mapped = match map_rpc_error(&response) {
@@ -673,7 +669,14 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
                         }
                     };
                     results[index] = Some(mapped);
-                    *slot = None;
+                    pending[index] = None;
+                    active_indices.swap_remove(cursor);
+                    let message_id = handle.message_id();
+                    sent_for_clock.remove(&message_id);
+                    pending_ids.remove(&message_id);
+                    if let Some(id_index) = ids.iter().position(|id| *id == message_id) {
+                        ids.swap_remove(id_index);
+                    }
                     extend_streaming_deadlines(
                         &mut attempt_deadline,
                         &mut overall_deadline,
@@ -681,6 +684,7 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
                     );
                 } else {
                     complete = false;
+                    cursor += 1;
                 }
             }
             let refilled = !refills.is_empty();
@@ -689,6 +693,10 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
                 let handle = engine
                     .invoke(&method, clock)
                     .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                let index = pending.len();
+                ids.push(handle.message_id());
+                pending_ids.insert(handle.message_id());
+                active_indices.push(index);
                 pending.push(Some(handle));
                 results.push(None);
                 complete = false;
@@ -718,6 +726,7 @@ pub fn invoke_batch_until_results_streaming<P: mono_proto_engine::RetryPolicy>(
             recv_overall,
             reused,
             2_000,
+            &mut transport.recv_buf,
         ) {
             Ok(packet) => {
                 note_inbound_liveness(&mut ping_inflight);
@@ -989,6 +998,7 @@ pub fn receive_updates(snapshot: &mut Snapshot) -> Result<Vec<Vec<u8>>, MtprotoE
             deadline,
             false,
             idle_wait_ms,
+            &mut transport.recv_buf,
         ) {
             Ok(packet) => packet,
             Err(MtprotoError::Message(message)) if message.starts_with("RPC timeout") => break,
@@ -1049,6 +1059,7 @@ pub fn ping_existing_rtt(
             deadline,
             false,
             2_000,
+            &mut transport.recv_buf,
         )?;
         let pong = ingest_update_packet(&mut engine, transport, packet, &clock)?;
         if pong == Some(ping_id) {
@@ -1215,6 +1226,7 @@ pub fn invoke_until_result<P: mono_proto_engine::RetryPolicy>(
             recv_overall,
             reused,
             2_000,
+            &mut transport.recv_buf,
         ) {
             Ok(packet) => {
                 // Any inbound is liveness.

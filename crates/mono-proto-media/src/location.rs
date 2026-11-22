@@ -97,6 +97,7 @@ impl FromIterator<((i64, i32), MediaRef)> for MediaIndex {
 
 /// Avatar `InputPeerPhotoFileLocation` cannot use hash 0 / min.
 /// https://core.telegram.org/api/min
+#[hotpath::measure]
 pub fn fill_zero_peer_photo_hashes(
     media: &mut MediaIndex,
     peers: &HashMap<i64, crate::peers::CachedPeer>,
@@ -107,6 +108,7 @@ pub fn fill_zero_peer_photo_hashes(
 }
 
 /// Repair only the requested entry, without walking the whole media index.
+#[hotpath::measure]
 pub fn fill_zero_peer_photo_hash(
     media: &mut MediaIndex,
     peers: &HashMap<i64, crate::peers::CachedPeer>,
@@ -124,14 +126,30 @@ pub fn fill_peer_photo_hash(
     chat_id: i64,
 ) {
     if let Some(peer) = crate::peers::usable_cached_peer(peers, chat_id) {
-        if let MediaLocation::PeerPhoto { peer_kind, peer_id, access_hash, .. } = &mut item.location
-            && *peer_kind == peer.kind && *peer_id == peer.id && *access_hash == 0 {
-                *access_hash = peer.access_hash;
-            }
-        if let Some(MediaLocation::PeerPhoto { peer_kind, peer_id, access_hash, .. }) = &mut item.display_location
-            && *peer_kind == peer.kind && *peer_id == peer.id && *access_hash == 0 {
-                *access_hash = peer.access_hash;
-            }
+        if let MediaLocation::PeerPhoto {
+            peer_kind,
+            peer_id,
+            access_hash,
+            ..
+        } = &mut item.location
+            && *peer_kind == peer.kind
+            && *peer_id == peer.id
+            && *access_hash == 0
+        {
+            *access_hash = peer.access_hash;
+        }
+        if let Some(MediaLocation::PeerPhoto {
+            peer_kind,
+            peer_id,
+            access_hash,
+            ..
+        }) = &mut item.display_location
+            && *peer_kind == peer.kind
+            && *peer_id == peer.id
+            && *access_hash == 0
+        {
+            *access_hash = peer.access_hash;
+        }
     }
 }
 
@@ -380,30 +398,32 @@ pub fn media_for_download(
         MediaDownloadKind::Full => Ok(media.clone()),
         MediaDownloadKind::Display => {
             if let Some(loc) = &media.display_location
-                && location_is_getfile_thumb(loc) {
-                    let mut copy = media.clone();
-                    copy.location = loc.clone();
-                    copy.file_size = None;
-                    copy.cache_key = media
-                        .display_cache_key
-                        .clone()
-                        .unwrap_or_else(|| format!("{}:display", media.cache_key));
-                    return Ok(copy);
-                }
+                && location_is_getfile_thumb(loc)
+            {
+                let mut copy = media.clone();
+                copy.location = loc.clone();
+                copy.file_size = None;
+                copy.cache_key = media
+                    .display_cache_key
+                    .clone()
+                    .unwrap_or_else(|| format!("{}:display", media.cache_key));
+                return Ok(copy);
+            }
             Err(MtprotoError::Message("no display size".into()))
         }
         MediaDownloadKind::Thumb => {
             if let Some(loc) = &media.thumb_location
-                && location_is_getfile_thumb(loc) {
-                    let mut copy = media.clone();
-                    copy.location = loc.clone();
-                    copy.file_size = None;
-                    copy.cache_key = media
-                        .thumb_cache_key
-                        .clone()
-                        .unwrap_or_else(|| media.cache_key.clone());
-                    return Ok(copy);
-                }
+                && location_is_getfile_thumb(loc)
+            {
+                let mut copy = media.clone();
+                copy.location = loc.clone();
+                copy.file_size = None;
+                copy.cache_key = media
+                    .thumb_cache_key
+                    .clone()
+                    .unwrap_or_else(|| media.cache_key.clone());
+                return Ok(copy);
+            }
             // Only size is already a getFile photo thumb (`m`/`x`/…); not a full document.
             if location_is_getfile_thumb(&media.location) {
                 return Ok(media.clone());

@@ -169,9 +169,7 @@ impl AuthAdapter {
 
 impl AuthorizationAdapter for AuthAdapter {
     fn request_parameters(&mut self) -> Result<Vec<u8>, mono_proto_engine::Error> {
-        let req = ReqPqMultiRequest {
-            nonce: self.nonce,
-        };
+        let req = ReqPqMultiRequest { nonce: self.nonce };
         encode_boxed(&req).map_err(|e| mono_proto_engine::Error::Authorization(e.to_string()))
     }
 
@@ -369,7 +367,7 @@ impl AuthorizationAdapter for AuthAdapter {
 
         let client_inner = mono_proto::transport::ClientDhInnerDataConstructor {
             nonce: self.nonce,
-            server_nonce: server_nonce,
+            server_nonce,
             retry_id: 0,
             g_b: g_b_bytes,
         };

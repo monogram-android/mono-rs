@@ -186,7 +186,9 @@ pub fn media_ref_from_photo(photo: &Photo, cache_key: String) -> Option<MediaRef
                 display_location: None,
                 sticker_set_id: None,
                 sticker_set_access_hash: None,
-                source_url: None, refresh_source: None, webpage_id: None,
+                source_url: None,
+                refresh_source: None,
+                webpage_id: None,
             });
         }
     }
@@ -217,7 +219,9 @@ pub fn media_ref_from_photo(photo: &Photo, cache_key: String) -> Option<MediaRef
         display_location: None,
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None, refresh_source: None, webpage_id: None,
+        source_url: None,
+        refresh_source: None,
+        webpage_id: None,
     })
 }
 
@@ -250,7 +254,9 @@ pub fn media_ref_from_photo_with_thumbs(photo: &Photo, cache_key: String) -> Opt
         display_location: None,
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None, refresh_source: None, webpage_id: None,
+        source_url: None,
+        refresh_source: None,
+        webpage_id: None,
     })
 }
 
@@ -335,8 +341,14 @@ fn persist_class(key: &(i64, i32), media: &MediaRef) -> PersistClass {
         // The picker keeps catalog ids ready for the account lifetime. Evicting
         // their locations makes regular stickers fall back to the custom-emoji API.
         if matches!(media.location, MediaLocation::Document { .. })
-            && (media.sticker_set_id.zip(media.sticker_set_access_hash).is_some()
-                || matches!(media.refresh_source, Some(crate::media_location::MediaRefreshSource::SavedGifs)))
+            && (media
+                .sticker_set_id
+                .zip(media.sticker_set_access_hash)
+                .is_some()
+                || matches!(
+                    media.refresh_source,
+                    Some(crate::media_location::MediaRefreshSource::SavedGifs)
+                ))
         {
             return PersistClass::CatalogDocument;
         }
@@ -399,18 +411,21 @@ pub fn insert_media(index: &mut MediaIndex, key: (i64, i32), media: MediaRef) {
     evict_overflow(index, class);
 }
 
+#[hotpath::measure]
 pub fn bound_media_index(index: &mut MediaIndex) {
     let mut kept = [0usize; 3];
-    let mut drop_keys = crate::collections::HashSet::default();
+    let mut drop_keys = Vec::new();
     for (key, media) in index.iter().rev() {
         let (slot, cap) = match persist_class(key, media) {
-            PersistClass::Avatar | PersistClass::CatalogDocument | PersistClass::WebpageOwner => continue,
+            PersistClass::Avatar | PersistClass::CatalogDocument | PersistClass::WebpageOwner => {
+                continue;
+            }
             PersistClass::Message => (0, MESSAGE_MEDIA_CAP),
             PersistClass::ZeroDocument => (1, ZERO_ID_DOCUMENT_CAP),
             PersistClass::Instant => (2, INSTANT_VIEW_CAP),
         };
         if kept[slot] == cap {
-            drop_keys.insert(*key);
+            drop_keys.push(*key);
         } else {
             kept[slot] += 1;
         }
@@ -444,9 +459,10 @@ pub fn persisted_media_entry(message_id: i32, media: &MediaRef) -> Option<MediaR
 
 fn strip_large_inline(location: &mut MediaLocation) {
     if let MediaLocation::Inline { bytes, .. } = location
-        && bytes.len() > PERSISTED_INLINE_BYTE_CAP {
-            bytes.clear();
-        }
+        && bytes.len() > PERSISTED_INLINE_BYTE_CAP
+    {
+        bytes.clear();
+    }
 }
 
 pub fn needs_video_avatar_upgrade(media: &MediaRef) -> bool {
@@ -533,7 +549,9 @@ pub fn media_ref_peer_photo(
         display_location: Some(small_location),
         sticker_set_id: None,
         sticker_set_access_hash: None,
-        source_url: None, refresh_source: None, webpage_id: None,
+        source_url: None,
+        refresh_source: None,
+        webpage_id: None,
         location: MediaLocation::PeerPhoto {
             peer_kind,
             peer_id,
@@ -618,28 +636,28 @@ pub fn webpage_content(webpage: &WebPage) -> Option<(MediaRef, MediaMetrics)> {
         supports_streaming: false,
     };
     if let Some(photo) = page.photo.as_ref()
-        && let Photo::Photo(ph) = photo.as_ref() {
-            let cache_key = format!("photo:{}", ph.id);
-            if let Some(mut indexed) = media_ref_from_photo_with_thumbs(photo.as_ref(), cache_key) {
-                indexed.kind = "webpage".into();
-                indexed.webpage_id = Some(page.id);
-                let sizes: Vec<PhotoSize> = vector_boxed_items(&ph.sizes).cloned().collect();
-                let full_ty = match &indexed.location {
-                    MediaLocation::Photo { thumb_size, .. } => thumb_size.clone(),
-                    _ => String::new(),
-                };
-                let thumb_ty = match &indexed.thumb_location {
-                    Some(MediaLocation::Photo { thumb_size, .. }) => Some(thumb_size.clone()),
-                    _ => None,
-                };
-                if let Some((ty, inline)) = pick_display_size(&sizes, thumb_ty.as_deref(), &full_ty)
-                {
-                    indexed.display_cache_key = Some(format!("{}:display", indexed.cache_key));
-                    indexed.display_location = Some(photo_file_location(ph, ty, inline));
-                }
-                return Some((indexed, metrics));
+        && let Photo::Photo(ph) = photo.as_ref()
+    {
+        let cache_key = format!("photo:{}", ph.id);
+        if let Some(mut indexed) = media_ref_from_photo_with_thumbs(photo.as_ref(), cache_key) {
+            indexed.kind = "webpage".into();
+            indexed.webpage_id = Some(page.id);
+            let sizes: Vec<PhotoSize> = vector_boxed_items(&ph.sizes).cloned().collect();
+            let full_ty = match &indexed.location {
+                MediaLocation::Photo { thumb_size, .. } => thumb_size.clone(),
+                _ => String::new(),
+            };
+            let thumb_ty = match &indexed.thumb_location {
+                Some(MediaLocation::Photo { thumb_size, .. }) => Some(thumb_size.clone()),
+                _ => None,
+            };
+            if let Some((ty, inline)) = pick_display_size(&sizes, thumb_ty.as_deref(), &full_ty) {
+                indexed.display_cache_key = Some(format!("{}:display", indexed.cache_key));
+                indexed.display_location = Some(photo_file_location(ph, ty, inline));
             }
+            return Some((indexed, metrics));
         }
+    }
     Some((
         MediaRef {
             file_size: None,
@@ -655,14 +673,18 @@ pub fn webpage_content(webpage: &WebPage) -> Option<(MediaRef, MediaMetrics)> {
             display_location: None,
             sticker_set_id: None,
             sticker_set_access_hash: None,
-            source_url: None, refresh_source: None, webpage_id: Some(page.id),
+            source_url: None,
+            refresh_source: None,
+            webpage_id: Some(page.id),
         },
         metrics,
     ))
 }
 
 pub fn webpage_entry(page: &WebPage) -> Option<MediaRef> {
-    if let Some((media, _)) = webpage_content(page) { return Some(media); }
+    if let Some((media, _)) = webpage_content(page) {
+        return Some(media);
+    }
     let id = match page {
         WebPage::WebPagePending(page) => page.id,
         WebPage::WebPageEmpty(page) => page.id,
@@ -673,20 +695,45 @@ pub fn webpage_entry(page: &WebPage) -> Option<MediaRef> {
 
 fn webpage_owner(id: i64) -> MediaRef {
     MediaRef {
-        file_size: None, kind: "webpage_owner".into(), cache_key: format!("web:owner:{id}"),
-        location: MediaLocation::Inline { bytes: Vec::new(), extension: "jpg".into() },
-        thumb_cache_key: None, thumb_location: None, display_cache_key: None, display_location: None,
-        sticker_set_id: None, sticker_set_access_hash: None, source_url: None,
-        refresh_source: None, webpage_id: Some(id),
+        file_size: None,
+        kind: "webpage_owner".into(),
+        cache_key: format!("web:owner:{id}"),
+        location: MediaLocation::Inline {
+            bytes: Vec::new(),
+            extension: "jpg".into(),
+        },
+        thumb_cache_key: None,
+        thumb_location: None,
+        display_cache_key: None,
+        display_location: None,
+        sticker_set_id: None,
+        sticker_set_access_hash: None,
+        source_url: None,
+        refresh_source: None,
+        webpage_id: Some(id),
     }
 }
 
-pub fn update_webpage(index: &mut MediaIndex, page: &WebPage, channel: Option<i64>) -> Vec<(i64, i32)> {
-    let Some(updated) = webpage_entry(page) else { return Vec::new() };
-    let owners: Vec<_> = index.iter().filter_map(|(key, media)| {
-        (key.1 > 0 && media.webpage_id == updated.webpage_id && channel.is_none_or(|chat| chat == key.0)).then_some(*key)
-    }).collect();
-    for owner in &owners { insert_media(index, *owner, updated.clone()); }
+pub fn update_webpage(
+    index: &mut MediaIndex,
+    page: &WebPage,
+    channel: Option<i64>,
+) -> Vec<(i64, i32)> {
+    let Some(updated) = webpage_entry(page) else {
+        return Vec::new();
+    };
+    let owners: Vec<_> = index
+        .iter()
+        .filter_map(|(key, media)| {
+            (key.1 > 0
+                && media.webpage_id == updated.webpage_id
+                && channel.is_none_or(|chat| chat == key.0))
+            .then_some(*key)
+        })
+        .collect();
+    for owner in &owners {
+        insert_media(index, *owner, updated.clone());
+    }
     owners
 }
 
@@ -731,7 +778,9 @@ pub fn extract_from_media(media: &MessageMedia) -> Option<(MediaRef, MediaMetric
                     display_location,
                     sticker_set_id: None,
                     sticker_set_access_hash: None,
-                    source_url: None, refresh_source: None, webpage_id: None,
+                    source_url: None,
+                    refresh_source: None,
+                    webpage_id: None,
                 },
                 metrics,
             ))
@@ -807,7 +856,9 @@ pub fn extract_from_media(media: &MessageMedia) -> Option<(MediaRef, MediaMetric
                     display_location,
                     sticker_set_id,
                     sticker_set_access_hash,
-                    source_url: None, refresh_source: None, webpage_id: None,
+                    source_url: None,
+                    refresh_source: None,
+                    webpage_id: None,
                 },
                 metrics,
             ))
@@ -876,10 +927,14 @@ pub fn index_message_media(msg: &Message, index: &mut MediaIndex) -> IndexedMess
         };
     };
     if let MessageMedia::MessageMediaWebPage(page) = media.as_ref()
-        && let Some(entry) = webpage_entry(&page.webpage) {
-            insert_media(index, (chat_id, m.id), entry);
-        }
-    if matches!(media.as_ref(), MessageMedia::MessageMediaUnsupported(_) | MessageMedia::MessageMediaWidget(_)) {
+        && let Some(entry) = webpage_entry(&page.webpage)
+    {
+        insert_media(index, (chat_id, m.id), entry);
+    }
+    if matches!(
+        media.as_ref(),
+        MessageMedia::MessageMediaUnsupported(_) | MessageMedia::MessageMediaWidget(_)
+    ) {
         return IndexedMessageMedia {
             kind: Some("unsupported".into()),
             ..IndexedMessageMedia::default()
@@ -1102,7 +1157,7 @@ pub fn media_ref_from_document(doc: &mono_proto::latest::api::DocumentConstructo
     };
     let mut media = MediaRef {
         file_size: Some(doc.size),
-        kind: kind,
+        kind,
         cache_key,
         location: document_file_location(doc, String::new(), None),
         thumb_cache_key: None,
@@ -1111,7 +1166,9 @@ pub fn media_ref_from_document(doc: &mono_proto::latest::api::DocumentConstructo
         display_location: None,
         sticker_set_id,
         sticker_set_access_hash,
-        source_url: None, refresh_source: None, webpage_id: None,
+        source_url: None,
+        refresh_source: None,
+        webpage_id: None,
     };
     attach_document_thumbs(doc, &mut media);
     media

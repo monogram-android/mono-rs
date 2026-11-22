@@ -26,6 +26,8 @@ pub struct ChatDto {
     pub last_media_thumb_cache_key: Option<String>,
     pub last_message_id: i32,
     pub can_view: bool,
+    #[serde(default)]
+    pub write_access_known: bool,
     pub can_send_plain: bool,
     pub can_send_photos: bool,
     #[serde(default)]

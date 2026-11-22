@@ -59,7 +59,28 @@ fn note_update_cache_clone() {
     UPDATE_CACHE_CLONES.with(|cell| cell.set(cell.get() + 1));
 }
 
+#[derive(Default)]
+struct DrainSync {
+    started: bool,
+}
+
+impl DrainSync {
+    fn start(&mut self, already_syncing: bool, events: &mut Vec<UpdateEventDto>) {
+        if !already_syncing && !self.started {
+            self.started = true;
+            events.push(UpdateEventDto::SyncState { is_syncing: true });
+        }
+    }
+
+    fn finish(self, committed: &mut bool, next: bool) -> Option<UpdateEventDto> {
+        let emit = sync_edge(*committed || self.started, next);
+        *committed = next;
+        emit.then_some(UpdateEventDto::SyncState { is_syncing: next })
+    }
+}
+
 struct AppliedDrain {
+    sync: DrainSync,
     peers: HashMap<i64, mono_proto_types::peers::CachedPeer>,
     before_peers: HashMap<i64, mono_proto_types::peers::CachedPeer>,
     media: mono_proto_media::media::MediaIndex,
@@ -488,14 +509,16 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         let mut pending_channels = Vec::new();
         let mut stopped_channel = None;
         let mut events = Vec::new();
-        let sync_started = !client.data.lock().is_syncing
+        let mut sync = DrainSync::default();
+        let already_syncing = client.data.lock().is_syncing;
+        if !already_syncing
             && catch_up_active(
                 !needs_difference,
                 visible_gap_recovery_pending(&recovery, open_chat, &lazy_exceptions, lazy_enabled),
                 false,
-            );
-        if sync_started {
-            events.push(UpdateEventDto::SyncState { is_syncing: true });
+            )
+        {
+            sync.start(already_syncing, &mut events);
         }
         if !needs_difference {
             let _span = mono_proto_media::perf::span("updates.apply");
@@ -547,9 +570,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
             }
         }
         if needs_difference {
-            if !client.data.lock().is_syncing && !sync_started {
-                events.push(UpdateEventDto::SyncState { is_syncing: true });
-            }
+            sync.start(client.data.lock().is_syncing, &mut events);
             let _span = mono_proto_media::perf::span("updates.difference");
             let (page, has_more) = mono_proto_runtime::rpc::with_rpc_timeout_secs(8, || {
                 updates_rpc::drain_difference(
@@ -599,13 +620,8 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                 break;
             };
             let entry = recovery.remove(index).unwrap();
-            if !entry.watching
-                && !client.data.lock().is_syncing
-                && !events
-                    .iter()
-                    .any(|event| matches!(event, UpdateEventDto::SyncState { is_syncing: true }))
-            {
-                events.push(UpdateEventDto::SyncState { is_syncing: true });
+            if !entry.watching {
+                sync.start(client.data.lock().is_syncing, &mut events);
             }
             let chat_id = entry.chat_id;
             let pts = channel_pts.get(&chat_id).copied().unwrap_or(1);
@@ -717,6 +733,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         Ok((
             events,
             Some(AppliedDrain {
+                sync,
                 peers,
                 before_peers,
                 media,
@@ -775,8 +792,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
     let persist_needed;
     let mut journal_batch = None;
     let mut journal_generation = 0;
-    let is_syncing_now;
-    let should_emit_sync_state;
+    let sync_event;
     {
         let mut d = client.data.lock();
         // A completed old-account poll must not repopulate state after logout
@@ -788,7 +804,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
             io.transport = None;
             return Err(expired_session_lease());
         }
-        is_syncing_now = catch_up_active(
+        let is_syncing_now = catch_up_active(
             io.last_difference.is_some(),
             visible_gap_recovery_pending(
                 &applied.recovery,
@@ -803,14 +819,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         let media_changed =
             merge_changed_entries(&mut d.media, &applied.before_media, applied.media);
         let next_cursor = prefer_newer_cursor(d.updates.clone(), applied.cursor);
-        should_emit_sync_state = sync_edge(
-            d.is_syncing
-                || events
-                    .iter()
-                    .any(|event| matches!(event, UpdateEventDto::SyncState { is_syncing: true })),
-            is_syncing_now,
-        );
-        d.is_syncing = is_syncing_now;
+        sync_event = applied.sync.finish(&mut d.is_syncing, is_syncing_now);
         let durable_events: Vec<UpdateEventDto>;
         (durable_events, events) = std::mem::take(&mut events)
             .into_iter()
@@ -862,10 +871,8 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
     drop(io);
     drop(gate);
     schedule_file_cleanup(&client);
-    if should_emit_sync_state {
-        events.push(UpdateEventDto::SyncState {
-            is_syncing: is_syncing_now,
-        });
+    if let Some(event) = sync_event {
+        events.push(event);
     }
     let Some(batch) = journal_batch else {
         if persist_needed {

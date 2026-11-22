@@ -234,8 +234,11 @@ pub(crate) fn fetch_user_full(
         info.profile_photo.as_ref().map(|p| p.as_ref()),
         info.personal_photo.as_ref().map(|p| p.as_ref()),
     );
-    let avatar_known = avatar_cache_key.is_some() || matches!(&user, User::User(user) if user.min.is_none());
-    if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
+    let avatar_known =
+        avatar_cache_key.is_some() || matches!(&user, User::User(user) if user.min.is_none());
+    if avatar_known && avatar_cache_key.is_none() {
+        media_index.shift_remove(&(peer_id, 0));
+    }
     let (phone, is_bot, is_verified, is_scam, is_premium) = match &user {
         User::User(u) => (
             u.phone.clone().filter(|s| !s.is_empty()),
@@ -279,6 +282,12 @@ pub(crate) fn fetch_user_full(
             is_premium,
             None,
             info.blocked.is_some(),
+            match &user {
+                User::User(u) if u.id == info.id && u.min.is_none() => {
+                    Some(access_json(&crate::dialogs::user_chat_meta(""), false))
+                }
+                _ => None,
+            },
         ),
     })
 }
@@ -304,9 +313,11 @@ pub(crate) fn fetch_basic_chat(
     let mut avatar_cache_key = None;
     let mut avatar_known = false;
     let mut members_count = None;
+    let mut access = None;
     for chat in vector_boxed_items(&full.chats) {
         match chat {
             TlChat::Chat(c) if c.id == chat_id => {
+                access = chat_access(chat);
                 title = c.title.clone();
                 members_count = Some(c.participants_count);
                 avatar_known = true;
@@ -315,6 +326,7 @@ pub(crate) fn fetch_basic_chat(
                 break;
             }
             TlChat::ChatForbidden(c) if c.id == chat_id => {
+                access = chat_access(chat);
                 title = c.title.clone();
                 break;
             }
@@ -324,7 +336,9 @@ pub(crate) fn fetch_basic_chat(
     avatar_cache_key =
         index_full_chat_photo(media_index, peer_id, &full.full_chat).or(avatar_cache_key);
     avatar_known |= avatar_cache_key.is_some();
-    if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
+    if avatar_known && avatar_cache_key.is_none() {
+        media_index.shift_remove(&(peer_id, 0));
+    }
     Ok(ProfileDto {
         id: peer_id,
         kind: "chat".into(),
@@ -348,6 +362,7 @@ pub(crate) fn fetch_basic_chat(
             false,
             None,
             false,
+            access,
         ),
     })
 }
@@ -398,21 +413,21 @@ pub(crate) fn fetch_channel(
     let mut username = None;
     let mut avatar_cache_key = None;
     let mut avatar_known = false;
-    let mut kind = "channel".to_string();
+    let mut kind = String::new();
     let mut verified = false;
     let mut scam = false;
     let mut emoji_status = None;
+    let mut access = None;
     for chat in vector_boxed_items(&full.chats) {
         match chat {
             TlChat::Channel(c) if c.id == cached.id => {
+                access = chat_access(chat);
                 title = c.title.clone();
                 username = first_username(&c.username, &c.usernames);
                 avatar_known = c.min.is_none();
                 emoji_status =
                     emoji_status_document_id(c.emoji_status.as_ref().map(|s| s.as_ref()));
-                if c.megagroup.is_some() {
-                    kind = "group".into();
-                }
+                kind = channel_kind(c.broadcast.is_some(), c.megagroup.is_some()).into();
                 verified = c.verified.is_some();
                 scam = c.scam.is_some() || c.fake.is_some();
                 avatar_cache_key = index_chat_photo(
@@ -426,7 +441,9 @@ pub(crate) fn fetch_channel(
                 break;
             }
             TlChat::ChannelForbidden(c) if c.id == cached.id => {
+                access = chat_access(chat);
                 title = c.title.clone();
+                kind = channel_kind(c.broadcast.is_some(), c.megagroup.is_some()).into();
                 break;
             }
             _ => {}
@@ -435,7 +452,9 @@ pub(crate) fn fetch_channel(
     avatar_cache_key =
         index_full_chat_photo(media_index, peer_id, &full.full_chat).or(avatar_cache_key);
     avatar_known |= avatar_cache_key.is_some();
-    if avatar_known && avatar_cache_key.is_none() { media_index.shift_remove(&(peer_id, 0)); }
+    if avatar_known && avatar_cache_key.is_none() {
+        media_index.shift_remove(&(peer_id, 0));
+    }
     // Broadcast channels expose the subscriber list only when the server allows it;
     // megagroups are attempted anyway and hidden on failure.
     let participants_visible = if kind == "channel" {
@@ -466,6 +485,7 @@ pub(crate) fn fetch_channel(
             false,
             participants_visible,
             false,
+            access,
         ),
     })
 }
@@ -509,6 +529,38 @@ pub fn get_profile(
     fetch_channel(snapshot, api_id, peers, media_index, peer_id)
 }
 
+fn channel_kind(broadcast: bool, megagroup: bool) -> &'static str {
+    if broadcast && !megagroup {
+        "channel"
+    } else {
+        "group"
+    }
+}
+
+fn chat_access(chat: &TlChat) -> Option<serde_json::Value> {
+    let (_, meta) = crate::dialogs::chat_meta_from_tl(chat)?;
+    if !meta.write_access_known {
+        return None;
+    }
+    Some(access_json(
+        &meta,
+        crate::dialogs::chat_poll_permission(chat),
+    ))
+}
+
+fn access_json(meta: &crate::dialogs::ChatMeta, can_send_polls: bool) -> serde_json::Value {
+    json!({
+        "left": meta.left,
+        "view": meta.can_view,
+        "plain": meta.can_send_plain,
+        "photos": meta.can_send_photos,
+        "polls": can_send_polls,
+        "forward": meta.can_forward,
+        "delete_others": meta.can_delete_others,
+        "manage_topics": meta.can_manage_topics,
+    })
+}
+
 pub(crate) fn profile_extra_json(
     members: Option<i32>,
     online: Option<i32>,
@@ -521,6 +573,7 @@ pub(crate) fn profile_extra_json(
     premium: bool,
     participants: Option<bool>,
     blocked: bool,
+    access: Option<serde_json::Value>,
 ) -> Option<String> {
     if members.is_none()
         && online.is_none()
@@ -533,6 +586,7 @@ pub(crate) fn profile_extra_json(
         && !premium
         && participants.is_none()
         && !blocked
+        && access.is_none()
     {
         return None;
     }
@@ -549,6 +603,7 @@ pub(crate) fn profile_extra_json(
             "premium": premium,
             "participants": participants,
             "blocked": blocked,
+            "access": access,
         })
         .to_string(),
     )

@@ -96,18 +96,19 @@ pub fn refresh_home_from_backup(
     let now = unix_now();
     let cached = load_config_cache(session_path);
     if let Some(cached) = cached.as_ref()
-        && cached.expires > now {
-            merge_home(home_dc, cached.endpoints.clone());
-            write_status(
-                session_path,
-                &format!(
-                    "getConfig source=cache home_dc={home_dc} options={} ttl={}s",
-                    cached.endpoints.len(),
-                    cached.expires - now
-                ),
-            );
-            return;
-        }
+        && cached.expires > now
+    {
+        merge_home(home_dc, cached.endpoints.clone());
+        write_status(
+            session_path,
+            &format!(
+                "getConfig source=cache home_dc={home_dc} options={} ttl={}s",
+                cached.endpoints.len(),
+                cached.expires - now
+            ),
+        );
+        return;
+    }
     match fetch_home_options_live(home_dc, api_id, snapshot) {
         Ok((home, server_expires)) => {
             let expires = clamp_expires(server_expires, now);
@@ -246,6 +247,7 @@ fn fetch_home_options_once(
         conn,
         framing,
         input: Vec::new(),
+        recv_buf: vec![0_u8; 64 * 1024],
         last_io: std::time::Instant::now(),
     });
     let cfg = crate::rpc::with_live_transport(&mut slot, || {

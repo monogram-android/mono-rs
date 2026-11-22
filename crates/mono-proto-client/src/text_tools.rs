@@ -854,9 +854,9 @@ pub fn get_text_tools_availability(
                 Ok(peer) => peer.clone(),
                 Err(_) => return Ok((false, false)),
             };
-            Ok(call_with_migrate(state, |state| {
+            call_with_migrate(state, |state| {
                 Ok(fetch_peer_translation_flags(state, &peer))
-            })?)
+            })
         })?;
     Ok(TextToolsAvailabilityDto {
         manual_translation: config.manual_enabled(),

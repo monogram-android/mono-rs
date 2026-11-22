@@ -240,7 +240,8 @@ pub fn prepare_extra_main_sessions(
             return Ok(());
         }
     }
-    mono_proto_media::perf::span("pfs.promote_main").with(|| promote_main(&client, &mut negotiate))?;
+    mono_proto_media::perf::span("pfs.promote_main")
+        .with(|| promote_main(&client, &mut negotiate))?;
     let allowance = mono_proto_runtime::scheduler::main_session_allowance();
     if allowance <= 1 {
         mono_proto_runtime::scheduler::set_bound_extra_sessions(0);
@@ -250,7 +251,9 @@ pub fn prepare_extra_main_sessions(
     let want = want.min(mono_proto_runtime::scheduler::READ_LANES);
     let mut bound = 0_usize;
     for lane in client.rpc.iter().take(want) {
-        if mono_proto_media::perf::span("pfs.read_lane").with(|| bind_lane(&client, lane, &mut negotiate)) {
+        if mono_proto_media::perf::span("pfs.read_lane")
+            .with(|| bind_lane(&client, lane, &mut negotiate))
+        {
             bound += 1;
         }
     }

@@ -78,13 +78,13 @@ pub fn message_aes_key_iv(
         });
     }
     let x = direction.x();
-    let mut a_input = Vec::with_capacity(52);
-    a_input.extend_from_slice(msg_key);
-    a_input.extend_from_slice(&auth_key[x..x + 36]);
+    let mut a_input = [0_u8; 52];
+    a_input[..16].copy_from_slice(msg_key);
+    a_input[16..].copy_from_slice(&auth_key[x..x + 36]);
     let a = sha256(&a_input);
-    let mut b_input = Vec::with_capacity(52);
-    b_input.extend_from_slice(&auth_key[40 + x..76 + x]);
-    b_input.extend_from_slice(msg_key);
+    let mut b_input = [0_u8; 52];
+    b_input[..36].copy_from_slice(&auth_key[40 + x..76 + x]);
+    b_input[36..].copy_from_slice(msg_key);
     let b = sha256(&b_input);
     let mut key = [0_u8; 32];
     key[..8].copy_from_slice(&a[..8]);

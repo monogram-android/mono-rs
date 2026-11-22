@@ -46,11 +46,21 @@ fn resolved_static_avatar_classification_requires_exact_peer_cache_identity() {
 #[test]
 fn bounding_mixed_classes_preserves_values_and_global_fifo_order() {
     let avatar = media_ref_peer_photo(
-        crate::peers::PeerKind::User, 7, 1, 9, 2, "avatar:7".into(), false, None,
+        crate::peers::PeerKind::User,
+        7,
+        1,
+        9,
+        2,
+        "avatar:7".into(),
+        false,
+        None,
     );
     let mut document = avatar.clone();
     document.cache_key = "document:7".into();
-    document.location = MediaLocation::Inline { bytes: vec![1, 2, 3], extension: "jpg".into() };
+    document.location = MediaLocation::Inline {
+        bytes: vec![1, 2, 3],
+        extension: "jpg".into(),
+    };
     let mut catalog = document.clone();
     catalog.location = MediaLocation::Document {
         id: 7,
@@ -78,19 +88,36 @@ fn bounding_mixed_classes_preserves_values_and_global_fifo_order() {
     // Replacing an existing entry must not promote its FIFO position.
     mixed.insert((1, 1), document);
     let mut reference = mixed.clone();
-    for class in [PersistClass::Message, PersistClass::ZeroDocument, PersistClass::Instant] {
+    for class in [
+        PersistClass::Message,
+        PersistClass::ZeroDocument,
+        PersistClass::Instant,
+    ] {
         let cap = class_cap(class).unwrap();
-        let keys: Vec<_> = reference.iter()
+        let keys: Vec<_> = reference
+            .iter()
             .filter(|(key, value)| persist_class(key, value) == class)
-            .map(|(key, _)| *key).collect();
+            .map(|(key, _)| *key)
+            .collect();
         let overflow = keys.len().saturating_sub(cap);
-        for key in keys.into_iter().take(overflow) { reference.shift_remove(&key); }
+        for key in keys.into_iter().take(overflow) {
+            reference.shift_remove(&key);
+        }
     }
     bound_media_index(&mut mixed);
-    assert_eq!(mixed.len(), 3300 + MESSAGE_MEDIA_CAP + ZERO_ID_DOCUMENT_CAP + INSTANT_VIEW_CAP);
-    assert_eq!(mixed.iter().collect::<Vec<_>>(), reference.iter().collect::<Vec<_>>());
+    assert_eq!(
+        mixed.len(),
+        3300 + MESSAGE_MEDIA_CAP + ZERO_ID_DOCUMENT_CAP + INSTANT_VIEW_CAP
+    );
+    assert_eq!(
+        mixed.iter().collect::<Vec<_>>(),
+        reference.iter().collect::<Vec<_>>()
+    );
     bound_media_index(&mut mixed);
-    assert_eq!(mixed.iter().collect::<Vec<_>>(), reference.iter().collect::<Vec<_>>());
+    assert_eq!(
+        mixed.iter().collect::<Vec<_>>(),
+        reference.iter().collect::<Vec<_>>()
+    );
 }
 
 #[test]

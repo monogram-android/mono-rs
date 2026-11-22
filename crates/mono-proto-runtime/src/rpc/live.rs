@@ -14,6 +14,7 @@ pub struct LiveTransport {
     pub conn: ObfuscatedTcp,
     pub framing: PaddedIntermediate,
     pub input: Vec<u8>,
+    pub recv_buf: Vec<u8>,
     /// Last send/recv on this TCP; stale reuse probes ping first.
     pub last_io: std::time::Instant,
 }

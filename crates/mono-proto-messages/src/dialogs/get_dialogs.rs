@@ -6,20 +6,17 @@ use crate::{HashMap, HashMapExt, HashSet, HashSetExt};
 use mono_proto::latest::api::{
     Chat as TlChat, ChatPhoto, Dialog, InputPeer, InputPeerEmptyConstructor, Message,
     MessagesDialogs, MessagesGetDialogsRequest, MessagesGetPinnedDialogsRequest,
-    MessagesPeerDialogs, Peer, PeerNotifySettings, True, TrueConstructor, User, UserProfilePhoto,
-    Vector,
+    MessagesPeerDialogs, Peer, PeerNotifySettings, True, TrueConstructor, User, Vector,
 };
 use mono_proto_session::Snapshot;
 
-use super::peers::{
-    cache_from_users_chats, index_dialog_avatar, index_users_chats, title_for_peer,
-};
+use super::peers::{cache_from_users_chats, index_users_chats, title_for_peer};
 use super::preview::message_preview;
 use crate::api_invoke;
 use crate::emoji_status::emoji_status_document_id;
 use crate::media::{self, MediaIndex};
 use crate::peers::{
-    self, CachedPeer, PeerKind, chat_id_for_channel, chat_id_for_chat, chat_id_for_user,
+    self, CachedPeer, chat_id_for_channel, chat_id_for_chat, chat_id_for_user,
     input_peer_from_cached, peer_chat_id, vector_boxed_items,
 };
 use crate::presence::user_status_parts;
@@ -337,6 +334,7 @@ pub fn map_peer_dialogs(
             last_media_thumb_cache_key: last_thumb,
             last_message_id: last_id,
             can_view: meta.can_view,
+            write_access_known: meta.write_access_known,
             can_send_plain: meta.can_send_plain,
             can_send_photos: meta.can_send_photos,
             can_send_polls: poll_peers.contains(&chat_id),

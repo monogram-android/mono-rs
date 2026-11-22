@@ -195,25 +195,33 @@ pub fn lock_upload_lane(
     loop {
         mono_proto_runtime::request_control::check()
             .map_err(|e| MtprotoError::Message(e.to_string()))?;
-        client.connections.wait(std::time::Duration::ZERO)
+        client
+            .connections
+            .wait(std::time::Duration::ZERO)
             .map_err(|e| MtprotoError::Message(e.to_string()))?;
         for lane in &client.upload {
             if let Some(io) = lane.io.try_lock()
                 && io.perm_key.is_some()
-                    && crate::bind_temp::temp_key_valid(&io.snapshot, io.temp_expires_at)
-                {
-                    mono_proto_runtime::request_control::check()
-                        .map_err(|e| MtprotoError::Message(e.to_string()))?;
-                    client.connections.wait(std::time::Duration::ZERO)
-                        .map_err(|e| MtprotoError::Message(e.to_string()))?;
-                    return Ok(io);
-                }
-        }
-        for (index, lane) in client.upload.iter().enumerate() {
-            if (pfs || index == 0) && let Some(io) = lane.io.try_lock() {
+                && crate::bind_temp::temp_key_valid(&io.snapshot, io.temp_expires_at)
+            {
                 mono_proto_runtime::request_control::check()
                     .map_err(|e| MtprotoError::Message(e.to_string()))?;
-                client.connections.wait(std::time::Duration::ZERO)
+                client
+                    .connections
+                    .wait(std::time::Duration::ZERO)
+                    .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                return Ok(io);
+            }
+        }
+        for (index, lane) in client.upload.iter().enumerate() {
+            if (pfs || index == 0)
+                && let Some(io) = lane.io.try_lock()
+            {
+                mono_proto_runtime::request_control::check()
+                    .map_err(|e| MtprotoError::Message(e.to_string()))?;
+                client
+                    .connections
+                    .wait(std::time::Duration::ZERO)
                     .map_err(|e| MtprotoError::Message(e.to_string()))?;
                 return Ok(io);
             }

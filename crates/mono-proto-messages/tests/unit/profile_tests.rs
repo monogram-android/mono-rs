@@ -13,7 +13,7 @@ fn admin_tags_default_to_role_and_preserve_custom_rank() {
 fn extra_json_omits_empty_and_keeps_counts() {
     assert_eq!(
         profile_extra_json(
-            None, None, None, None, false, false, false, None, false, None, false,
+            None, None, None, None, false, false, false, None, false, None, false, None,
         ),
         None
     );
@@ -29,6 +29,7 @@ fn extra_json_omits_empty_and_keeps_counts() {
         true,
         Some(false),
         true,
+        None,
     )
     .expect("json");
     assert!(raw.contains("\"members\":12"));

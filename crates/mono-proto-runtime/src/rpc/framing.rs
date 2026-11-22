@@ -96,8 +96,8 @@ pub fn recv_framed(
     overall_deadline: std::time::Instant,
     reused: bool,
     idle_wait_ms: u64,
+    recv_buf: &mut Vec<u8>,
 ) -> Result<Vec<u8>, MtprotoError> {
-    let mut buf = vec![0_u8; 64 * 1024];
     let mut controls = 0;
     loop {
         // Decode before the deadline check. A blocking recv can return a complete
@@ -144,7 +144,7 @@ pub fn recv_framed(
                     attempt_deadline.saturating_duration_since(now).as_millis() as u64
                 };
                 conn.set_io_timeout_ms(wait_ms.max(50));
-                let n = match conn.receive(&mut buf) {
+                let n = match conn.receive(recv_buf) {
                     Ok(n) => n,
                     Err(e) if is_waitable_io(&e.to_string()) => {
                         let last_ctor = LAST_INBOUND_CTOR.with(|c| c.get());
@@ -166,7 +166,7 @@ pub fn recv_framed(
                     )));
                 }
                 *received = received.saturating_add(n);
-                input.extend_from_slice(&buf[..n]);
+                input.extend_from_slice(&recv_buf[..n]);
             }
             Err(e) => return Err(MtprotoError::Message(e.to_string())),
         }
@@ -219,6 +219,7 @@ pub fn open_live(
         conn,
         framing,
         input: Vec::new(),
+        recv_buf: vec![0_u8; 64 * 1024],
         last_io: std::time::Instant::now(),
     })
 }
@@ -259,6 +260,7 @@ pub fn open_live_addr(
         conn,
         framing: PaddedIntermediate::default(),
         input: Vec::new(),
+        recv_buf: vec![0_u8; 64 * 1024],
         last_io: std::time::Instant::now(),
     })
 }

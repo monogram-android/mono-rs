@@ -54,27 +54,16 @@ pub fn recovery_wait_secs(error: &MtprotoError) -> u64 {
 
 pub fn prepare_channel_recovery(
     queue: &mut VecDeque<ChannelRecovery>,
-    mut pending: Vec<i64>,
+    pending: Vec<i64>,
     open_chat: i64,
     now: u64,
 ) {
     queue.retain(|entry| !entry.watching || entry.chat_id == open_chat);
     for chat_id in pending
-        .drain(..)
+        .into_iter()
         .filter(|id| channel_id_from_chat_id(*id).is_some())
     {
-        if let Some(entry) = queue.iter_mut().find(|entry| entry.chat_id == chat_id) {
-            if entry.watching {
-                entry.watching = false;
-                entry.due_at = now;
-            }
-        } else {
-            queue.push_back(ChannelRecovery {
-                chat_id,
-                due_at: now,
-                watching: false,
-            });
-        }
+        enqueue_channel_gap(queue, chat_id, now);
     }
     if channel_id_from_chat_id(open_chat).is_some()
         && !queue.iter().any(|entry| entry.chat_id == open_chat)
@@ -126,6 +115,29 @@ pub fn gap_recovery_pending(recovery: &VecDeque<ChannelRecovery>) -> bool {
     recovery.iter().any(|entry| !entry.watching)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChannelPriority {
+    Open,
+    Exception,
+    Offscreen,
+}
+
+impl ChannelPriority {
+    fn for_chat(chat_id: i64, open_chat: i64, exceptions: &HashSet<i64>) -> Self {
+        if chat_id == open_chat {
+            Self::Open
+        } else if exceptions.contains(&chat_id) {
+            Self::Exception
+        } else {
+            Self::Offscreen
+        }
+    }
+
+    fn eligible(self, lazy: bool) -> bool {
+        !lazy || self != Self::Offscreen
+    }
+}
+
 pub fn visible_gap_recovery_pending(
     recovery: &VecDeque<ChannelRecovery>,
     open_chat: i64,
@@ -134,7 +146,7 @@ pub fn visible_gap_recovery_pending(
 ) -> bool {
     recovery.iter().any(|entry| {
         !entry.watching
-            && (!lazy || entry.chat_id == open_chat || exceptions.contains(&entry.chat_id))
+            && ChannelPriority::for_chat(entry.chat_id, open_chat, exceptions).eligible(lazy)
     })
 }
 
@@ -145,14 +157,20 @@ pub fn next_channel_recovery(
     lazy: bool,
     now: u64,
 ) -> Option<usize> {
-    recovery
-        .iter()
-        .position(|entry| entry.due_at <= now && entry.chat_id == open_chat)
-        .or_else(|| {
-            recovery.iter().position(|entry| {
-                entry.due_at <= now && (!lazy || exceptions.contains(&entry.chat_id))
-            })
-        })
+    let mut first_eligible = None;
+    for (index, entry) in recovery.iter().enumerate() {
+        if entry.due_at > now {
+            continue;
+        }
+        let priority = ChannelPriority::for_chat(entry.chat_id, open_chat, exceptions);
+        if priority == ChannelPriority::Open {
+            return Some(index);
+        }
+        if priority.eligible(lazy) && first_eligible.is_none() {
+            first_eligible = Some(index);
+        }
+    }
+    first_eligible
 }
 
 /// Chats the user opened, or listed as exceptions, must not stay on the lazy
@@ -167,22 +185,27 @@ pub fn pull_priority_channels(
     let promoted: Vec<i64> = lazy_queue
         .iter()
         .copied()
-        .filter(|id| *id == open_chat || exceptions.contains(id))
+        .filter(|&id| ChannelPriority::for_chat(id, open_chat, exceptions).eligible(true))
         .collect();
     for chat_id in promoted {
         lazy_queue.remove(&chat_id);
-        if let Some(entry) = recovery.iter_mut().find(|entry| entry.chat_id == chat_id) {
-            if entry.watching {
-                entry.watching = false;
-                entry.due_at = now;
-            }
-        } else {
-            recovery.push_back(ChannelRecovery {
-                chat_id,
-                due_at: now,
-                watching: false,
-            });
+        enqueue_channel_gap(recovery, chat_id, now);
+    }
+}
+
+fn enqueue_channel_gap(queue: &mut VecDeque<ChannelRecovery>, chat_id: i64, now: u64) {
+    if let Some(entry) = queue.iter_mut().find(|entry| entry.chat_id == chat_id) {
+        if entry.watching {
+            entry.watching = false;
+            entry.due_at = now;
         }
+        // A repeated gap must not cancel a retry delay or jump the queue.
+    } else {
+        queue.push_back(ChannelRecovery {
+            chat_id,
+            due_at: now,
+            watching: false,
+        });
     }
 }
 
@@ -220,7 +243,7 @@ pub fn route_lazy_channels(
     }
     let mut full = Vec::new();
     for chat_id in pending {
-        if chat_id == open_chat || exceptions.contains(&chat_id) {
+        if ChannelPriority::for_chat(chat_id, open_chat, exceptions).eligible(true) {
             full.push(chat_id);
         } else if channel_id_from_chat_id(chat_id).is_some() {
             lazy_queue.insert(chat_id);

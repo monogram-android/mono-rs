@@ -385,6 +385,7 @@ fn native_retry_local_reconnect_and_request_cancellation() {
             deadline,
             false,
             500,
+            &mut second.recv_buf,
         )
         .unwrap();
         let packet = trim_padded_mtproto_packet(&packet);

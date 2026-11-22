@@ -381,28 +381,28 @@ pub fn collect_peer_labels(
 }
 
 pub fn fill_missing_reply_quotes(dtos: &mut [MessageDto]) {
-    let texts: HashMap<i32, String> = dtos
-        .iter()
-        .filter_map(|message| {
-            message
-                .text
-                .as_ref()
-                .filter(|text| !text.is_empty())
-                .map(|text| (message.id, text.clone()))
-        })
-        .collect();
-    for dto in dtos.iter_mut() {
-        if dto
-            .reply_quote
-            .as_ref()
-            .is_some_and(|quote| !quote.is_empty())
-        {
-            continue;
+    let missing_parent = |dto: &MessageDto| {
+        if dto.reply_quote.as_ref().is_none_or(String::is_empty) {
+            dto.reply_to_msg_id
+        } else {
+            None
         }
-        if let Some(id) = dto.reply_to_msg_id
-            && let Some(text) = texts.get(&id)
+    };
+    if !dtos.iter().any(|dto| missing_parent(dto).is_some()) {
+        return;
+    }
+
+    let sources: HashMap<i32, usize> = dtos
+        .iter()
+        .enumerate()
+        .filter(|(_, dto)| dto.text.as_ref().is_some_and(|text| !text.is_empty()))
+        .map(|(index, dto)| (dto.id, index))
+        .collect();
+    for index in 0..dtos.len() {
+        if let Some(id) = missing_parent(&dtos[index])
+            && let Some(&source) = sources.get(&id)
         {
-            dto.reply_quote = Some(text.clone());
+            dtos[index].reply_quote = dtos[source].text.clone();
         }
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::Error;
 use mono_proto_session::{Clock, ReceivedMessageResult, Snapshot};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 
 /// Schema-generated method adapter. No global constructor table is required.
@@ -109,9 +109,9 @@ pub struct Engine<P> {
     /// Mutable protocol session.
     pub session: Snapshot,
     policy: P,
-    pending: BTreeMap<i64, Pending>,
+    pending: HashMap<i64, Pending>,
     outbound: VecDeque<OutboundMessage>,
-    responses: BTreeMap<i64, Vec<u8>>,
+    responses: HashMap<i64, Vec<u8>>,
 }
 
 impl<P: RetryPolicy> Engine<P> {
@@ -121,9 +121,9 @@ impl<P: RetryPolicy> Engine<P> {
         Ok(Self {
             session,
             policy,
-            pending: BTreeMap::new(),
+            pending: HashMap::new(),
             outbound: VecDeque::new(),
-            responses: BTreeMap::new(),
+            responses: HashMap::new(),
         })
     }
 

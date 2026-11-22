@@ -101,7 +101,10 @@ fn difference_too_long_advances_authoritative_pts_and_emits_cache_invalidation()
     let mut events = Vec::new();
     apply_difference_too_long(&mut state, 42, &mut events);
 
-    assert_eq!((state.pts, state.qts, state.date, state.seq), (42, 7, 100, 3));
+    assert_eq!(
+        (state.pts, state.qts, state.date, state.seq),
+        (42, 7, 100, 3)
+    );
     assert!(matches!(
         events.as_slice(),
         [
@@ -120,14 +123,38 @@ fn channel_too_long_response_invalidates_before_recovered_messages() {
         UpdatesChannelDifferenceTooLongConstructor,
     };
     let words: Vec<u32> = vec![
-        UpdatesChannelDifferenceTooLongConstructor::ID, 3, 30,
-        DialogConstructor::ID, 1, PeerChannelConstructor::ID, 7, 0,
-        41, 0, 0, 1, 0, 0, 0, PeerNotifySettingsConstructor::ID, 0, 40,
-        VectorConstructor::<Box<Message>>::ID, 1,
-        MessageServiceConstructor::ID, 0, 41, PeerChannelConstructor::ID, 7, 0,
-        100, MessageActionHistoryClearConstructor::ID,
-        VectorConstructor::<Box<mono_proto::latest::api::Chat>>::ID, 0,
-        VectorConstructor::<Box<mono_proto::latest::api::User>>::ID, 0,
+        UpdatesChannelDifferenceTooLongConstructor::ID,
+        3,
+        30,
+        DialogConstructor::ID,
+        1,
+        PeerChannelConstructor::ID,
+        7,
+        0,
+        41,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        PeerNotifySettingsConstructor::ID,
+        0,
+        40,
+        VectorConstructor::<Box<Message>>::ID,
+        1,
+        MessageServiceConstructor::ID,
+        0,
+        41,
+        PeerChannelConstructor::ID,
+        7,
+        0,
+        100,
+        MessageActionHistoryClearConstructor::ID,
+        VectorConstructor::<Box<mono_proto::latest::api::Chat>>::ID,
+        0,
+        VectorConstructor::<Box<mono_proto::latest::api::User>>::ID,
+        0,
     ];
     let bytes: Vec<u8> = words.into_iter().flat_map(u32::to_le_bytes).collect();
     let mut decoder = Decoder::new(&bytes, Limits::default()).unwrap();
@@ -135,7 +162,11 @@ fn channel_too_long_response_invalidates_before_recovered_messages() {
     decoder.finish().unwrap();
     let chat_id = chat_id_for_channel(7);
     let page = apply_channel_difference_response(
-        &mut HashMap::new(), &mut MediaIndex::default(), chat_id, 10, response,
+        &mut HashMap::new(),
+        &mut MediaIndex::default(),
+        chat_id,
+        10,
+        response,
     );
     assert_eq!(page.pts, 40);
     assert!(page.final_page);

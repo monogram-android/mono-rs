@@ -5,6 +5,7 @@ pub fn media_key(chat_id: i64, message_id: i32) -> String {
     format!("{chat_id}:{message_id}")
 }
 
+#[hotpath::measure]
 pub fn media_from_index(index: &MediaIndex) -> HashMap<String, MediaRef> {
     let mut out = HashMap::with_capacity(index.len());
     for ((chat, message), media) in index {
@@ -15,6 +16,7 @@ pub fn media_from_index(index: &MediaIndex) -> HashMap<String, MediaRef> {
     out
 }
 
+#[hotpath::measure]
 pub fn media_order_from_index(index: &MediaIndex) -> Vec<String> {
     index
         .iter()
@@ -24,6 +26,7 @@ pub fn media_order_from_index(index: &MediaIndex) -> Vec<String> {
 }
 
 /// Project the stored entries and their order together with one key formatting pass.
+#[hotpath::measure]
 pub fn media_and_order_from_index(index: &MediaIndex) -> (HashMap<String, MediaRef>, Vec<String>) {
     let mut entries = HashMap::with_capacity(index.len());
     let mut order = Vec::with_capacity(index.len());

@@ -24,7 +24,7 @@ pub struct PlainMessage {
 
 /// Encode the special unencrypted envelope used during authorization.
 pub fn encode_plain_message(message: &PlainMessage) -> Result<Vec<u8>, Error> {
-    if message.body.is_empty() || message.body.len() % 4 != 0 {
+    if message.body.is_empty() || !message.body.len().is_multiple_of(4) {
         return Err(Error::MalformedMessage(
             "plain body must be nonempty and 4-byte aligned",
         ));
@@ -53,7 +53,7 @@ pub fn decode_plain_message(input: &[u8], max_body_length: usize) -> Result<Plai
     }
     let message_id = i64::from_le_bytes(input[8..16].try_into().expect("checked header"));
     let length = u32::from_le_bytes(input[16..20].try_into().expect("checked header")) as usize;
-    if length == 0 || length % 4 != 0 || length > max_body_length {
+    if length == 0 || !length.is_multiple_of(4) || length > max_body_length {
         return Err(Error::MalformedMessage("invalid plain message length"));
     }
     if input.len() != 20 + length {
@@ -170,7 +170,7 @@ pub fn decode_container(
                 .try_into()
                 .expect("fixed field"),
         ) as usize;
-        if length == 0 || length % 4 != 0 || length > max_body_length {
+        if length == 0 || !length.is_multiple_of(4) || length > max_body_length {
             return Err(Error::MalformedMessage("invalid nested message length"));
         }
         let body_end = header_end

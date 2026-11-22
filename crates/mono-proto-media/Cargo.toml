@@ -6,6 +6,10 @@ rust-version.workspace = true
 license = "GPL-3.0-only"
 publish = false
 
+[features]
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
+
 [dependencies]
 aes = "0.9"
 cipher = "0.5"
@@ -18,3 +22,4 @@ mono-proto-observability = { path = "../mono-proto-observability" }
 mono-proto-runtime = { path = "../mono-proto-runtime" }
 mono-proto-session = { path = "../mono-proto-session" }
 mono-proto-types = { path = "../mono-proto-types" }
+hotpath.workspace = true

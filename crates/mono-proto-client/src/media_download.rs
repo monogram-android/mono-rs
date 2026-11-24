@@ -1205,8 +1205,22 @@ pub fn history_with_peer_refresh(
     offset_date: i32,
     add_offset: i32,
 ) -> Result<Vec<MessageDto>, MtprotoError> {
+    Ok(
+        history_page_with_peer_refresh(state, chat_id, limit, offset_id, offset_date, add_offset)?
+            .messages,
+    )
+}
+
+pub(crate) fn history_page_with_peer_refresh(
+    state: &mut ClientState,
+    chat_id: i64,
+    limit: i32,
+    offset_id: i32,
+    offset_date: i32,
+    add_offset: i32,
+) -> Result<dialogs::HistoryPageDto, MtprotoError> {
     with_peer_refresh(state, chat_id, |state| {
-        dialogs::get_history(
+        dialogs::get_history_page(
             &mut state.snapshot,
             state.api_id,
             &mut state.peers,

@@ -275,6 +275,19 @@ pub fn get_history(
     offset_date: i32,
     add_offset: i32,
 ) -> Result<Vec<MessageDto>, MtprotoError> {
+    Ok(get_history_page(handle, chat_id, limit, offset_id, offset_date, add_offset)?.messages)
+}
+
+pub use dialogs::HistoryPageDto;
+
+pub fn get_history_page(
+    handle: u64,
+    chat_id: i64,
+    limit: i32,
+    offset_id: i32,
+    offset_date: i32,
+    add_offset: i32,
+) -> Result<HistoryPageDto, MtprotoError> {
     if let Ok(client) = get_client(handle) {
         client.data.lock().last_history_chat_id = chat_id;
     }
@@ -283,7 +296,14 @@ pub fn get_history(
         // rpc_result after ~100KiB of msg_container (emulator last_ctor=0x73f1f8dc).
         let messages = mono_proto_runtime::rpc::with_rpc_timeout_secs(20, || {
             call_with_migrate(state, |state| {
-                history_with_peer_refresh(state, chat_id, limit, offset_id, offset_date, add_offset)
+                history_page_with_peer_refresh(
+                    state,
+                    chat_id,
+                    limit,
+                    offset_id,
+                    offset_date,
+                    add_offset,
+                )
             })
         })?;
         Ok(messages)

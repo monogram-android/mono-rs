@@ -2,6 +2,54 @@ use super::{get_history, refresh_message_media};
 use crate::{HashMap, HashMapExt};
 use mono_proto_session::{OsRandom, Snapshot};
 
+fn page_of_empty_messages(ids: &[i32]) -> super::HistoryPageDto {
+    use mono_proto::latest::api::*;
+    fn vector<T>(items: Vec<T>) -> Box<Vector<T>> {
+        Box::new(Vector::Vector(VectorConstructor {
+            field_0: items.len() as u32,
+            field_1: items,
+        }))
+    }
+    let response = MessagesMessages::MessagesMessages(MessagesMessagesConstructor {
+        messages: vector(
+            ids.iter()
+                .map(|&id| {
+                    Box::new(Message::MessageEmpty(MessageEmptyConstructor {
+                        flags: 0,
+                        id,
+                        peer_id: None,
+                    }))
+                })
+                .collect(),
+        ),
+        topics: vector(vec![]),
+        chats: vector(vec![]),
+        users: vector(vec![]),
+    });
+    super::history::history_page_from_response(
+        response,
+        &mut HashMap::new(),
+        &mut Default::default(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn filtered_history_page_keeps_raw_count_and_oldest_id() {
+    let page = page_of_empty_messages(&[11, 7, 10]);
+    assert!(page.messages.is_empty());
+    assert_eq!(page.raw_count, 3);
+    assert_eq!(page.next_offset_id, Some(7));
+}
+
+#[test]
+fn empty_history_page_has_no_cursor() {
+    let page = page_of_empty_messages(&[]);
+    assert!(page.messages.is_empty());
+    assert_eq!(page.raw_count, 0);
+    assert_eq!(page.next_offset_id, None);
+}
+
 #[test]
 fn unknown_peer_fails_before_rpc() {
     let mut snapshot = Snapshot::new(2, &mut OsRandom).expect("snapshot");

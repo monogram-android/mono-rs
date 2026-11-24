@@ -15,6 +15,13 @@ use crate::peers::{
 };
 use crate::{MessageDto, MtprotoError};
 
+#[derive(Debug, Clone)]
+pub struct HistoryPageDto {
+    pub messages: Vec<MessageDto>,
+    pub raw_count: usize,
+    pub next_offset_id: Option<i32>,
+}
+
 pub fn get_history(
     snapshot: &mut Snapshot,
     api_id: i32,
@@ -27,6 +34,33 @@ pub fn get_history(
     add_offset: i32,
     user_id: Option<i64>,
 ) -> Result<Vec<MessageDto>, MtprotoError> {
+    Ok(get_history_page(
+        snapshot,
+        api_id,
+        peers,
+        media_index,
+        chat_id,
+        limit,
+        offset_id,
+        offset_date,
+        add_offset,
+        user_id,
+    )?
+    .messages)
+}
+
+pub fn get_history_page(
+    snapshot: &mut Snapshot,
+    api_id: i32,
+    peers: &mut HashMap<i64, CachedPeer>,
+    media_index: &mut MediaIndex,
+    chat_id: i64,
+    limit: i32,
+    offset_id: i32,
+    offset_date: i32,
+    add_offset: i32,
+    user_id: Option<i64>,
+) -> Result<HistoryPageDto, MtprotoError> {
     let cached = peers::require_usable_peer(peers, chat_id)?;
     let request = MessagesGetHistoryRequest {
         peer: Box::new(input_peer_from_cached(cached)),
@@ -39,11 +73,44 @@ pub fn get_history(
         hash: 0,
     };
     let response: MessagesMessages = api_invoke::invoke_api(snapshot, api_id, request)?;
-    let mut dtos = dtos_from_messages(response, peers, media_index)?;
+    let mut page = history_page_from_response(response, peers, media_index)?;
     crate::dialogs::rich_rpc::fill_unsupported_rich_text(
-        snapshot, api_id, peers, user_id, &mut dtos,
+        snapshot,
+        api_id,
+        peers,
+        user_id,
+        &mut page.messages,
     );
-    Ok(dtos)
+    Ok(page)
+}
+
+pub(super) fn history_page_from_response(
+    response: MessagesMessages,
+    peers: &mut HashMap<i64, CachedPeer>,
+    media_index: &mut MediaIndex,
+) -> Result<HistoryPageDto, MtprotoError> {
+    let rows = match &response {
+        MessagesMessages::MessagesMessages(m) => Some(&m.messages),
+        MessagesMessages::MessagesMessagesSlice(m) => Some(&m.messages),
+        MessagesMessages::MessagesChannelMessages(m) => Some(&m.messages),
+        _ => None,
+    };
+    let mut raw_count = 0;
+    let mut next_offset_id: Option<i32> = None;
+    for row in rows.into_iter().flat_map(|rows| vector_boxed_items(rows)) {
+        raw_count += 1;
+        let id = match row {
+            Message::Message(m) => m.id,
+            Message::MessageService(m) => m.id,
+            Message::MessageEmpty(m) => m.id,
+        };
+        next_offset_id = Some(next_offset_id.map_or(id, |oldest| oldest.min(id)));
+    }
+    Ok(HistoryPageDto {
+        messages: dtos_from_messages(response, peers, media_index)?,
+        raw_count,
+        next_offset_id,
+    })
 }
 
 /// https://core.telegram.org/method/messages.getReplies

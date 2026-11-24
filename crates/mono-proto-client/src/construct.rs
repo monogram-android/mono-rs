@@ -48,6 +48,11 @@ pub fn create_client(api_id: i32, api_hash: String, session_path: String) -> u64
         Ok(session) => (session, false),
         Err(_) => (None, true),
     };
+    let channel_flood_until = loaded
+        .as_ref()
+        .filter(|s| s.user_id.is_some())
+        .map(|s| s.channel_flood_until.clone())
+        .unwrap_or_default();
     let channel_recovery = loaded
         .as_ref()
         .map(|s| s.channel_recovery.clone())
@@ -143,6 +148,7 @@ pub fn create_client(api_id: i32, api_hash: String, session_path: String) -> u64
                 last_history_chat_id: 0,
                 channel_pts,
                 channel_recovery,
+                channel_flood_until,
                 channel_flood_waits: HashMap::default(),
                 seen_messages,
                 logout_tokens,

@@ -512,11 +512,20 @@ fn account_difference_retries_only_after_the_flood_wait_deadline() {
 
 #[test]
 fn channel_flood_wait_survives_watch_changes_and_gaps_until_the_exact_deadline() {
+    check_channel_flood_wait(false);
+}
+
+#[test]
+fn channel_flood_wait_survives_restart_and_watch_changes() {
+    check_channel_flood_wait(true);
+}
+
+fn check_channel_flood_wait(restart: bool) {
     use mono_proto_types::peers::chat_id_for_channel;
     use std::cell::Cell;
     use std::time::{Duration, Instant};
 
-    let path = temp_session("channel-difference-flood-wait");
+    let path = temp_session(if restart { "channel-flood-restart" } else { "channel-difference-flood-wait" });
     let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
     let client = get_client(handle).unwrap();
     let chat = chat_id_for_channel(7);
@@ -540,10 +549,11 @@ fn channel_flood_wait_survives_watch_changes_and_gaps_until_the_exact_deadline()
     let epoch = Instant::now();
     let elapsed = Cell::new(Duration::from_millis(500));
     let received = Duration::from_millis(750);
+    let active_handle = Cell::new(handle);
     let drain = |pending: &[i64], expected| {
         let mut request = None;
         let drained = super::drain_updates_with(
-            handle,
+            active_handle.get(),
             || 1_000 + elapsed.get().as_secs(),
             || epoch + elapsed.get(),
             |_, _| panic!("unexpected bootstrap"),
@@ -583,6 +593,18 @@ fn channel_flood_wait_survives_watch_changes_and_gaps_until_the_exact_deadline()
     };
     assert!(drain(&[], Some((chat, 100))).is_empty());
     assert!(client.data.lock().channel_recovery[0].watching);
+    if restart {
+        destroy_client(handle);
+        let reopened = create_client(1, "hash".into(), path.to_string_lossy().into());
+        active_handle.set(reopened);
+        let restored = get_client(reopened).unwrap();
+        restored.policy.main_session_allowance.store(1, super::Ordering::Relaxed);
+        restored.data.lock().last_history_chat_id = chat;
+        super::start_updates(reopened).unwrap();
+        assert!(drain(&[], None).is_empty());
+    }
+    let handle = active_handle.get();
+    let client = get_client(handle).unwrap();
 
     elapsed.set(received + Duration::from_millis(16_999));
     assert!(drain(&[], None).is_empty());
@@ -817,6 +839,7 @@ fn old_session_files_without_a_journal_still_load() {
         media_order: Vec::new(),
         channel_pts: Default::default(),
         channel_recovery: Default::default(),
+        channel_flood_until: Default::default(),
         seen_messages: Default::default(),
         session_dead: false,
         logout_tokens: Vec::new(),

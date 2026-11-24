@@ -105,6 +105,11 @@ pub fn persist(state: &mut ClientState) -> Result<(), MtprotoError> {
         media_order,
         channel_pts: state.channel_pts.clone(),
         channel_recovery: state.channel_recovery.clone(),
+        channel_flood_until: if state.user_id.is_some() && state.user_id == state.flood_wait_owner {
+            state.channel_flood_until.clone()
+        } else {
+            Default::default()
+        },
         seen_messages: state.seen_messages.clone(),
         logout_tokens: state.logout_tokens.clone(),
         new_session: state.new_session.clone(),
@@ -166,6 +171,7 @@ pub fn persist_updates_data(client: &Client, session_id: i64) -> Result<bool, Mt
             media_order,
             channel_pts: d.channel_pts.clone(),
             channel_recovery: d.channel_recovery.clone(),
+            channel_flood_until: d.channel_flood_until.clone(),
             seen_messages: d.seen_messages.clone(),
             logout_tokens: d.logout_tokens.clone(),
             new_session: d.new_session.clone(),

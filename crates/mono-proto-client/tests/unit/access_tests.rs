@@ -40,6 +40,27 @@ fn finish(handle: u64, client: Arc<Client>) {
     let _ = std::fs::remove_file(path);
 }
 
+#[test]
+fn replacing_account_discards_channel_flood_wait_in_memory_and_on_disk() {
+    let (handle, client) = client("replace-account-flood");
+    let path = client.data.lock().session_path.clone();
+    {
+        let mut d = client.data.lock();
+        d.channel_flood_until.insert(-7, u64::MAX);
+        d.channel_flood_waits.insert(-7, (std::time::Instant::now(), std::time::Duration::from_secs(17)));
+    }
+    with_client_mut(handle, |state| {
+        state.user_id = Some(43);
+        crate::persist::persist(state)
+    }).unwrap();
+    let saved = crate::session_store::FileSessionStore::new(&path).load().unwrap().unwrap();
+    assert_eq!(saved.user_id, Some(43));
+    assert!(saved.channel_flood_until.is_empty());
+    assert!(client.data.lock().channel_flood_until.is_empty());
+    assert!(client.data.lock().channel_flood_waits.is_empty());
+    finish(handle, client);
+}
+
 fn peer(hash: i64) -> CachedPeer {
     CachedPeer {
         kind: PeerKind::User,

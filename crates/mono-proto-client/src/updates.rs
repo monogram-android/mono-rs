@@ -435,8 +435,23 @@ fn drain_updates_with(
     let _active_request = ActiveUpdateRequest(&client.active_update_request);
     let expire_channel_flood_waits = |d: &mut ClientData| {
         let now = monotonic_now();
-        d.channel_flood_waits
-            .retain(|_, (received, wait)| now.saturating_duration_since(*received) < *wait);
+        let before = d.channel_flood_until.len();
+        d.channel_flood_until.retain(|chat_id, until| {
+            // On first use after restore, translate the wall deadline once.
+            let (received, wait) = d.channel_flood_waits.entry(*chat_id).or_insert_with(|| {
+                (now, Duration::from_secs(until.saturating_sub(wall_now())))
+            });
+            if now.saturating_duration_since(*received) < *wait {
+                true
+            } else {
+                d.channel_flood_waits.remove(chat_id);
+                false
+            }
+        });
+        if before != d.channel_flood_until.len() {
+            d.persist_epoch = d.persist_epoch.saturating_add(1);
+            schedule_persist(&client, d.home_session_id);
+        }
     };
     let now = wall_now();
     let (
@@ -447,6 +462,7 @@ fn drain_updates_with(
         home_salt,
         home_off,
         open_chat,
+        user_id,
         session_id,
         due_recovery,
         lazy_pending,
@@ -476,6 +492,7 @@ fn drain_updates_with(
             d.home_salt,
             d.home_time_offset,
             d.last_history_chat_id,
+            d.user_id,
             d.home_session_id,
             next_channel_recovery(
                 &d.channel_recovery,
@@ -487,6 +504,7 @@ fn drain_updates_with(
             )
             .is_some()
                 || (channel_id_from_chat_id(d.last_history_chat_id).is_some()
+                    && !d.channel_flood_waits.contains_key(&d.last_history_chat_id)
                     && !d
                         .channel_recovery
                         .iter()
@@ -521,6 +539,7 @@ fn drain_updates_with(
     };
     let mut slot = io.transport.take();
     mono_proto_runtime::rpc::clear_new_session_metadata();
+    let mut received_channel_wait = false;
     let drained = with_client_transport(&client, &mut slot, || {
         // Receive stays on the idle budget; recovery RPCs use their own 8s scope
         // so a waiting interactive caller can take the lane between pages.
@@ -690,9 +709,11 @@ fn drain_updates_with(
             let index = {
                 let mut d = client.data.lock();
                 expire_channel_flood_waits(&mut d);
+                let current_open = d.last_history_chat_id;
+                recovery.retain(|entry| !entry.watching || entry.chat_id == current_open);
                 next_channel_recovery(
                     &recovery,
-                    open_chat,
+                    current_open,
                     &lazy_exceptions,
                     lazy_enabled,
                     now,
@@ -746,11 +767,15 @@ fn drain_updates_with(
                     if !terminal_channel_error(&err) {
                         if let Some(wait) = mono_proto_media::download::flood_wait_secs(&err) {
                             let received = monotonic_now();
-                            client
-                                .data
-                                .lock()
-                                .channel_flood_waits
-                                .insert(chat_id, (received, Duration::from_secs(wait.max(5))));
+                            let wait = wait.max(5);
+                            let mut d = client.data.lock();
+                            if d.user_id != user_id || !session_lease_valid(&d, session_id) {
+                                return Err(expired_session_lease());
+                            }
+                            d.channel_flood_waits.insert(chat_id, (received, Duration::from_secs(wait)));
+                            d.channel_flood_until.insert(chat_id, wall_now().saturating_add(wait));
+                            d.persist_epoch = d.persist_epoch.saturating_add(1);
+                            received_channel_wait = true;
                             // Only the monotonic gate controls flood retry eligibility.
                             entry.due_at = 0;
                         } else {
@@ -853,6 +878,9 @@ fn drain_updates_with(
             io.transport = None;
             drop(io);
             drop(gate);
+            if received_channel_wait {
+                persist_journal_sync(&client, session_id)?;
+            }
             if temporary {
                 return Err(temporary_key_retry_error());
             }
@@ -863,7 +891,7 @@ fn drain_updates_with(
         }
     };
     let new_session = mono_proto_runtime::rpc::take_new_session_metadata();
-    let Some(applied) = applied else {
+    let Some(mut applied) = applied else {
         drop(io);
         drop(gate);
         if let Some(metadata) = new_session {
@@ -892,13 +920,15 @@ fn drain_updates_with(
         let mut d = client.data.lock();
         // A completed old-account poll must not repopulate state after logout
         // or authorization migration on the main lane.
-        if d.home_dc != home_dc
+        if d.user_id != user_id
+            || d.home_dc != home_dc
             || d.home_auth_key != home_auth
             || !session_lease_valid(&d, session_id)
         {
             io.transport = None;
             return Err(expired_session_lease());
         }
+        applied.recovery.retain(|entry| !entry.watching || entry.chat_id == d.last_history_chat_id);
         let is_syncing_now = catch_up_active(
             io.last_difference.is_some(),
             visible_gap_recovery_pending(
@@ -970,7 +1000,9 @@ fn drain_updates_with(
         events.push(event);
     }
     let Some(batch) = journal_batch else {
-        if persist_needed {
+        if received_channel_wait {
+            persist_journal_sync(&client, session_id)?;
+        } else if persist_needed {
             mono_proto_media::perf::count("updates.persist");
             schedule_persist(&client, session_id);
         }

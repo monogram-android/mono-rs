@@ -112,6 +112,8 @@ pub fn with_client_mut_binding<T>(
             updates_started: d.updates_started,
             channel_pts: d.channel_pts.clone(),
             channel_recovery: d.channel_recovery.clone(),
+            flood_wait_owner: d.user_id,
+            channel_flood_until: d.channel_flood_until.clone(),
             seen_messages: d.seen_messages.clone(),
             logout_tokens: d.logout_tokens.clone(),
             new_session: d.new_session.clone(),
@@ -226,6 +228,7 @@ pub fn with_client_mut_binding<T>(
             d.channel_recovery = state.channel_recovery;
             d.difference_flood_wait = None;
             d.channel_flood_waits.clear();
+            d.channel_flood_until.clear();
             d.seen_messages = state.seen_messages;
             d.updates_started = state.updates_started;
             if before_user_id.is_some() {
@@ -384,6 +387,8 @@ pub fn with_read_lane<T>(
                     updates_started: d.updates_started,
                     channel_pts: d.channel_pts.clone(),
                     channel_recovery: d.channel_recovery.clone(),
+                    flood_wait_owner: d.user_id,
+                    channel_flood_until: d.channel_flood_until.clone(),
                     seen_messages: d.seen_messages.clone(),
                     logout_tokens: d.logout_tokens.clone(),
                     new_session: d.new_session.clone(),

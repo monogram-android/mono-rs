@@ -60,6 +60,7 @@ impl FileSessionStore {
             media_order: Vec::new(),
             channel_pts: HashMap::new(),
             channel_recovery: Default::default(),
+            channel_flood_until: Default::default(),
             seen_messages: HashSet::new(),
             session_dead: false,
             logout_tokens: Vec::new(),

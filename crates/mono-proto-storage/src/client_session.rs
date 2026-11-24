@@ -55,6 +55,9 @@ pub struct ClientSession {
     pub channel_pts: HashMap<i64, i32>,
     #[serde(default)]
     pub channel_recovery: std::collections::VecDeque<ChannelRecovery>,
+    /// Per-channel flood retry deadlines in Unix seconds, independent of dialog watches.
+    #[serde(default)]
+    pub channel_flood_until: HashMap<i64, u64>,
     /// Deduplication keys for update events.
     #[serde(default)]
     pub seen_messages: HashSet<(i64, i32)>,

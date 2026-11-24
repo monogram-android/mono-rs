@@ -27,6 +27,7 @@ pub struct ClientData {
     pub channel_pts: HashMap<i64, i32>,
     pub channel_recovery: VecDeque<ChannelRecovery>,
     // Independent of queue entries, which can be promoted, dropped, or recreated.
+    pub channel_flood_until: HashMap<i64, u64>,
     pub channel_flood_waits: HashMap<i64, (Instant, Duration)>,
     pub seen_messages: HashSet<(i64, i32)>,
     pub logout_tokens: Vec<Vec<u8>>,
@@ -81,6 +82,9 @@ pub struct ClientState {
     pub seen_messages: HashSet<(i64, i32)>,
     pub logout_tokens: Vec<Vec<u8>>,
     pub new_session: Option<NewSessionMetadata>,
+    /// Account at capture, since an auth RPC can persist a new user before merging.
+    pub flood_wait_owner: Option<i64>,
+    pub channel_flood_until: HashMap<i64, u64>,
     /// Home auth key is dead (401 AUTH_KEY_* / SESSION_*). Fail RPCs without more network.
     pub session_dead: bool,
     pub session_dead_reason: Option<String>,

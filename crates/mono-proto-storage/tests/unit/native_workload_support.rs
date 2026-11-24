@@ -48,6 +48,7 @@ pub fn fixture(count: usize) -> ClientSession {
         media_order: Vec::with_capacity(count),
         channel_pts: HashMap::new(),
         channel_recovery: Default::default(),
+        channel_flood_until: Default::default(),
         seen_messages: HashSet::new(),
         session_dead: false,
         logout_tokens: Vec::new(),

@@ -164,7 +164,7 @@ pub fn keep_partial(err: &MtprotoError) -> bool {
     }
     flood_wait_secs(err).is_some()
         || upper.contains("TIMEOUT")
-        || upper.contains("FILE_REFERENCE")
+        || crate::media_location::is_file_reference_error(err)
         || upper.contains("DOWNLOAD INCOMPLETE")
         || upper.contains("OPTIONAL_PAUSED")
         || upper.contains("AUTH_KEY_UNREGISTERED")

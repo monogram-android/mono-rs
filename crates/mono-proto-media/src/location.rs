@@ -262,7 +262,8 @@ pub fn download_dc(home_dc: i32, loc: &MediaLocation) -> i32 {
 pub fn is_file_reference_error(err: &MtprotoError) -> bool {
     matches!(err, MtprotoError::Message(message) if {
         let upper = message.to_ascii_uppercase();
-        upper.contains("FILE_REFERENCE")
+        let code = upper.rsplit(": ").next().unwrap_or(&upper);
+        upper.contains("FILE_REFERENCE") || code == "FILEREF_EXPIRED" || code.starts_with("FILEREF_INVALID")
     })
 }
 

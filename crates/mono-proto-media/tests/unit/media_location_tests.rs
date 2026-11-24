@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn legacy_fileref_errors_trigger_reference_refresh() {
+    for message in [
+        "FILEREF_EXPIRED",
+        "RPC 400: FILEREF_EXPIRED",
+        "RPC 400: FILEREF_INVALID",
+    ] {
+        let err = MtprotoError::Message(message.into());
+        assert!(is_file_reference_error(&err));
+        assert!(crate::download::keep_partial(&err));
+    }
+    let unrelated = MtprotoError::Message("RPC 400: FILEREF_EXPIRED_OTHER".into());
+    assert!(!is_file_reference_error(&unrelated));
+    assert!(!crate::download::keep_partial(&unrelated));
+}
+
+#[test]
 fn targeted_hash_repair_updates_only_requested_entry_and_both_locations() {
     use crate::peers::{CachedPeer, PeerKind};
     let mut peers = HashMap::default();

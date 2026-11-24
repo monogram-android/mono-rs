@@ -55,7 +55,7 @@ pub fn get_dialogs(
     offset_peer_id: i64,
     folder_id: Option<i32>,
 ) -> Result<Vec<ChatDto>, MtprotoError> {
-    get_dialogs_page(
+    get_dialogs_page_with_pins(
         snapshot,
         api_id,
         peers,
@@ -65,6 +65,7 @@ pub fn get_dialogs(
         offset_id,
         offset_peer_id,
         folder_id,
+        PinnedDialogs::BestEffort,
     )
     .map(|page| page.chats)
 }
@@ -80,6 +81,38 @@ pub fn get_dialogs_page(
     offset_peer_id: i64,
     folder_id: Option<i32>,
 ) -> Result<DialogsPageDto, MtprotoError> {
+    get_dialogs_page_with_pins(
+        snapshot,
+        api_id,
+        peers,
+        media_index,
+        channel_pts,
+        offset_date,
+        offset_id,
+        offset_peer_id,
+        folder_id,
+        PinnedDialogs::Required,
+    )
+}
+
+#[derive(Clone, Copy)]
+pub enum PinnedDialogs {
+    BestEffort,
+    Required,
+}
+
+pub fn get_dialogs_page_with_pins(
+    snapshot: &mut Snapshot,
+    api_id: i32,
+    peers: &mut HashMap<i64, CachedPeer>,
+    media_index: &mut MediaIndex,
+    channel_pts: &mut HashMap<i64, i32>,
+    offset_date: i32,
+    offset_id: i32,
+    offset_peer_id: i64,
+    folder_id: Option<i32>,
+    pins: PinnedDialogs,
+) -> Result<DialogsPageDto, MtprotoError> {
     let offset_peer = if offset_peer_id == 0 {
         InputPeer::InputPeerEmpty(InputPeerEmptyConstructor {})
     } else {
@@ -88,10 +121,9 @@ pub fn get_dialogs_page(
     };
     let folder_present = folder_id.is_some();
     let request = MessagesGetDialogsRequest {
-        // flags.0 exclude_pinned, flags.1 folder_id. Both reference clients always send
-        // exclude_pinned together with folder_id, so mirror that shape exactly.
-        flags: if folder_present { 3 } else { 0 },
-        exclude_pinned: folder_present.then(|| Box::new(True::True(TrueConstructor {}))),
+        // Pins have their own request and must not consume ordinary page slots.
+        flags: if folder_present { 3 } else { 1 },
+        exclude_pinned: Some(Box::new(True::True(TrueConstructor {}))),
         folder_id,
         offset_date,
         offset_id,
@@ -111,6 +143,7 @@ pub fn get_dialogs_page(
             offset_id,
             offset_peer_id,
         },
+        pins,
         || {
             fetch_pinned_dialogs(
                 snapshot,
@@ -127,13 +160,18 @@ pub fn get_dialogs_page(
 pub(super) fn finish_dialogs_page(
     mut page: DialogsPageDto,
     offset: DialogsCursorDto,
+    pins: PinnedDialogs,
     fetch_pinned: impl FnOnce() -> Result<Vec<ChatDto>, MtprotoError>,
 ) -> Result<DialogsPageDto, MtprotoError> {
     if page.next_cursor == Some(offset) {
         page.next_cursor = None;
     }
     if offset.offset_date == 0 && offset.offset_id == 0 && offset.offset_peer_id == 0 {
-        page.chats = merge_pinned_prefix(fetch_pinned()?, page.chats);
+        match fetch_pinned() {
+            Ok(pinned) => page.chats = merge_pinned_prefix(pinned, page.chats),
+            Err(error) if matches!(pins, PinnedDialogs::Required) => return Err(error),
+            Err(_) => {}
+        }
     }
     Ok(page)
 }

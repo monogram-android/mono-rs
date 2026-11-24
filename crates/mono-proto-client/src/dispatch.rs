@@ -2,7 +2,7 @@ use crate::{
     ChatDto, DialogsPageDto, FolderDto, ForumTopicsPageDto, JoinChatDto, MessageDto, MtprotoError,
     NotifyExceptionDto, NotifySettingsDto, ProfileDto,
 };
-use mono_proto_messages::dialogs;
+use mono_proto_messages::dialogs::{self, PinnedDialogs};
 use mono_proto_messages::upload_rpc::UploadStaging;
 use mono_proto_runtime::scheduler;
 
@@ -17,14 +17,18 @@ use crate::state::ClientState;
 use std::sync::Arc;
 
 pub fn get_chats(handle: u64) -> Result<Vec<ChatDto>, MtprotoError> {
-    get_chats_page(handle).map(|page| page.chats)
+    first_chats_page(handle, PinnedDialogs::BestEffort).map(|page| page.chats)
 }
 
 pub fn get_chats_page(handle: u64) -> Result<DialogsPageDto, MtprotoError> {
+    first_chats_page(handle, PinnedDialogs::Required)
+}
+
+fn first_chats_page(handle: u64, pins: PinnedDialogs) -> Result<DialogsPageDto, MtprotoError> {
     with_read_lane(handle, |state| {
         mono_proto_runtime::rpc::with_rpc_timeout_secs(8, || {
             call_with_migrate(state, |state| {
-                dialogs::get_dialogs_page(
+                dialogs::get_dialogs_page_with_pins(
                     &mut state.snapshot,
                     state.api_id,
                     &mut state.peers,
@@ -33,7 +37,8 @@ pub fn get_chats_page(handle: u64) -> Result<DialogsPageDto, MtprotoError> {
                     0,
                     0,
                     0,
-                    None,
+                    Some(0),
+                    pins,
                 )
             })
         })
@@ -206,8 +211,15 @@ pub fn load_more_chats(
     offset_peer_id: i64,
     folder_id: i32,
 ) -> Result<Vec<ChatDto>, MtprotoError> {
-    load_more_chats_page(handle, offset_date, offset_id, offset_peer_id, folder_id)
-        .map(|page| page.chats)
+    more_chats_page(
+        handle,
+        offset_date,
+        offset_id,
+        offset_peer_id,
+        folder_id,
+        PinnedDialogs::BestEffort,
+    )
+    .map(|page| page.chats)
 }
 
 pub fn load_more_chats_page(
@@ -217,10 +229,28 @@ pub fn load_more_chats_page(
     offset_peer_id: i64,
     folder_id: i32,
 ) -> Result<DialogsPageDto, MtprotoError> {
+    more_chats_page(
+        handle,
+        offset_date,
+        offset_id,
+        offset_peer_id,
+        folder_id,
+        PinnedDialogs::Required,
+    )
+}
+
+fn more_chats_page(
+    handle: u64,
+    offset_date: i32,
+    offset_id: i32,
+    offset_peer_id: i64,
+    folder_id: i32,
+    pins: PinnedDialogs,
+) -> Result<DialogsPageDto, MtprotoError> {
     with_read_lane(handle, |state| {
         call_with_migrate(state, |state| {
             with_peer_refresh(state, offset_peer_id, |state| {
-                dialogs::get_dialogs_page(
+                dialogs::get_dialogs_page_with_pins(
                     &mut state.snapshot,
                     state.api_id,
                     &mut state.peers,
@@ -229,8 +259,8 @@ pub fn load_more_chats_page(
                     offset_date,
                     offset_id,
                     offset_peer_id,
-                    // 0 is the main list, which the plain page already covers.
-                    (folder_id > 0).then_some(folder_id),
+                    (folder_id >= 0).then_some(folder_id),
+                    pins,
                 )
             })
         })

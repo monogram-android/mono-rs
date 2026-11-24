@@ -245,12 +245,21 @@ fn first_dialogs_page_requires_pinned_dialogs_after_get_dialogs_succeeds() {
         offset_id: 0,
         offset_peer_id: 0,
     };
-    let error = get_dialogs::finish_dialogs_page(page.clone(), first, || {
-        Err(crate::MtprotoError::Message(
-            "RPC 420: FLOOD_WAIT_17".into(),
-        ))
-    })
-    .expect_err("required pinned dialogs failed");
+    use get_dialogs::PinnedDialogs;
+    let fallback =
+        get_dialogs::finish_dialogs_page(page.clone(), first, PinnedDialogs::BestEffort, || {
+            Err(crate::MtprotoError::Message("pins unavailable".into()))
+        })
+        .expect("legacy list keeps regular dialogs");
+    assert_eq!(fallback.chats.len(), 1);
+    assert_eq!(fallback.chats[0].id, -11);
+    let error =
+        get_dialogs::finish_dialogs_page(page.clone(), first, PinnedDialogs::Required, || {
+            Err(crate::MtprotoError::Message(
+                "RPC 420: FLOOD_WAIT_17".into(),
+            ))
+        })
+        .expect_err("required pinned dialogs failed");
     assert_eq!(error.to_string(), "RPC 420: FLOOD_WAIT_17");
 
     let pinned = map_peer_dialogs(
@@ -263,7 +272,8 @@ fn first_dialogs_page_requires_pinned_dialogs_after_get_dialogs_succeeds() {
         boxed_vec(vec![]),
     );
     let complete =
-        get_dialogs::finish_dialogs_page(page, first, || Ok(pinned)).expect("both RPCs succeeded");
+        get_dialogs::finish_dialogs_page(page, first, PinnedDialogs::Required, || Ok(pinned))
+            .expect("both RPCs succeeded");
     assert_eq!(complete.raw_count, 1);
     assert_eq!(complete.next_cursor, None);
     let rows: Vec<_> = complete

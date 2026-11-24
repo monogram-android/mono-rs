@@ -55,27 +55,59 @@ fn shared_avatar_lookup_repairs_a_copy_from_a_matching_full_peer() {
     {
         let mut data = client.data.lock();
         data.peers.insert(7, peer(91));
-        data.media.insert((7, 0), mono_proto_media::media::media_ref_peer_photo(
-            PeerKind::User, 7, 0, 8, 2, "avatar:7".into(), true, None,
-        ));
+        data.media.insert(
+            (7, 0),
+            mono_proto_media::media::media_ref_peer_photo(
+                PeerKind::User,
+                7,
+                0,
+                8,
+                2,
+                "avatar:7".into(),
+                true,
+                None,
+            ),
+        );
         let original = data.media.clone();
         for _ in 0..2 {
             let (_, _, media) = crate::media_download::indexed_media_for_download(
-                &data, 7, 0, mono_proto_media::media::MediaDownloadKind::Display,
-            ).expect("cached peer avoids main fallback").unwrap();
-            assert!(matches!(media.location,
-                mono_proto_media::media::MediaLocation::PeerPhoto { access_hash: 91, .. }
+                &data,
+                7,
+                0,
+                mono_proto_media::media::MediaDownloadKind::Display,
+            )
+            .expect("cached peer avoids main fallback")
+            .unwrap();
+            assert!(matches!(
+                media.location,
+                mono_proto_media::media::MediaLocation::PeerPhoto {
+                    access_hash: 91,
+                    ..
+                }
             ));
         }
         assert_eq!(data.media, original);
         assert_eq!(data.persist_epoch, 0);
-        assert!(crate::media_download::indexed_media_for_download(
-            &data, 7, 0, mono_proto_media::media::MediaDownloadKind::Full,
-        ).is_none(), "full avatar upgrade still uses repair path");
+        assert!(
+            crate::media_download::indexed_media_for_download(
+                &data,
+                7,
+                0,
+                mono_proto_media::media::MediaDownloadKind::Full,
+            )
+            .is_none(),
+            "full avatar upgrade still uses repair path"
+        );
         data.session_dead = true;
-        assert!(crate::media_download::indexed_media_for_download(
-            &data, 7, 0, mono_proto_media::media::MediaDownloadKind::Display,
-        ).is_none());
+        assert!(
+            crate::media_download::indexed_media_for_download(
+                &data,
+                7,
+                0,
+                mono_proto_media::media::MediaDownloadKind::Display,
+            )
+            .is_none()
+        );
     }
     finish(handle, client);
 }
@@ -85,32 +117,85 @@ fn shared_avatar_repair_rejects_unusable_or_mismatched_peers() {
     let (handle, client) = client("avatar-shared-invalid");
     {
         let mut data = client.data.lock();
-        data.media.insert((7, 0), mono_proto_media::media::media_ref_peer_photo(
-            PeerKind::User, 7, 0, 8, 2, "avatar:7".into(), false, None,
-        ));
-        for cached in [None, Some(peer(0)), Some(CachedPeer { min_hash: true, ..peer(91) }),
+        data.media.insert(
+            (7, 0),
+            mono_proto_media::media::media_ref_peer_photo(
+                PeerKind::User,
+                7,
+                0,
+                8,
+                2,
+                "avatar:7".into(),
+                false,
+                None,
+            ),
+        );
+        for cached in [
+            None,
+            Some(peer(0)),
+            Some(CachedPeer {
+                min_hash: true,
+                ..peer(91)
+            }),
             Some(CachedPeer { id: 8, ..peer(91) }),
-            Some(CachedPeer { kind: PeerKind::Channel, ..peer(91) })] {
+            Some(CachedPeer {
+                kind: PeerKind::Channel,
+                ..peer(91)
+            }),
+        ] {
             data.peers.clear();
-            if let Some(cached) = cached { data.peers.insert(7, cached); }
-            assert!(crate::media_download::indexed_media_for_download(
-                &data, 7, 0, mono_proto_media::media::MediaDownloadKind::Display,
-            ).is_none());
+            if let Some(cached) = cached {
+                data.peers.insert(7, cached);
+            }
+            assert!(
+                crate::media_download::indexed_media_for_download(
+                    &data,
+                    7,
+                    0,
+                    mono_proto_media::media::MediaDownloadKind::Display,
+                )
+                .is_none()
+            );
         }
         data.peers.insert(7, peer(91));
-        data.media.insert((7, 0), mono_proto_media::media::media_ref_peer_photo(
-            PeerKind::User, 7, 55, 8, 2, "avatar:7".into(), false, None,
-        ));
+        data.media.insert(
+            (7, 0),
+            mono_proto_media::media::media_ref_peer_photo(
+                PeerKind::User,
+                7,
+                55,
+                8,
+                2,
+                "avatar:7".into(),
+                false,
+                None,
+            ),
+        );
         let (_, _, media) = crate::media_download::indexed_media_for_download(
-            &data, 7, 0, mono_proto_media::media::MediaDownloadKind::Display,
-        ).unwrap().unwrap();
-        assert!(matches!(media.location,
-            mono_proto_media::media::MediaLocation::PeerPhoto { access_hash: 55, .. }
+            &data,
+            7,
+            0,
+            mono_proto_media::media::MediaDownloadKind::Display,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(matches!(
+            media.location,
+            mono_proto_media::media::MediaLocation::PeerPhoto {
+                access_hash: 55,
+                ..
+            }
         ));
         data.user_id = None;
-        assert!(crate::media_download::indexed_media_for_download(
-            &data, 7, 0, mono_proto_media::media::MediaDownloadKind::Display,
-        ).is_none());
+        assert!(
+            crate::media_download::indexed_media_for_download(
+                &data,
+                7,
+                0,
+                mono_proto_media::media::MediaDownloadKind::Display,
+            )
+            .is_none()
+        );
     }
     finish(handle, client);
 }
@@ -154,6 +239,40 @@ fn read_merge_keeps_concurrent_changes_and_applies_owned_deletions() {
         assert!(!d.peers.contains_key(&8));
         assert!(!d.peers.contains_key(&9));
         assert_eq!(d.persist_epoch, 1);
+    }
+    finish(handle, client);
+}
+
+#[test]
+fn late_dialog_observations_do_not_overwrite_live_channel_pts() {
+    use mono_proto_messages::dialogs::merge_channel_pts;
+    use mono_proto_types::peers::chat_id_for_channel;
+
+    let (handle, client) = client("channel-pts-race");
+    let known = chat_id_for_channel(7);
+    let concurrent = chat_id_for_channel(8);
+    let unknown = chat_id_for_channel(9);
+    client.data.lock().channel_pts.insert(known, 100);
+    with_read_lane(handle, |stale| {
+        assert!(EXTRA_READ_LANE.with(Cell::get));
+        assert_eq!(stale.channel_pts.get(&known), Some(&100));
+        assert!(!stale.channel_pts.contains_key(&concurrent));
+        {
+            let mut data = client.data.lock();
+            data.channel_pts.insert(known, 103);
+            data.channel_pts.insert(concurrent, 104);
+        }
+        for chat_id in [known, concurrent, unknown] {
+            merge_channel_pts(&mut stale.channel_pts, chat_id, Some(105));
+        }
+        Ok(())
+    })
+    .unwrap();
+    {
+        let data = client.data.lock();
+        assert_eq!(data.channel_pts.get(&known), Some(&103));
+        assert_eq!(data.channel_pts.get(&concurrent), Some(&104));
+        assert_eq!(data.channel_pts.get(&unknown), Some(&105));
     }
     finish(handle, client);
 }

@@ -2,9 +2,11 @@ use super::*;
 use crate::{HashMap, HashMapExt};
 use mono_proto::latest::api::{
     ChannelForbiddenConstructor, ChatConstructor, ChatForbiddenConstructor, ChatPhoto,
-    ChatPhotoEmptyConstructor, Dialog, DialogConstructor, Message, Peer, PeerChatConstructor,
-    PeerNotifySettings, PeerNotifySettingsConstructor, True, TrueConstructor, User, Vector,
-    VectorConstructor,
+    ChatPhotoEmptyConstructor, Dialog, DialogConstructor, DialogFolderConstructor, Folder,
+    FolderConstructor, Message, MessageAction, MessageActionEmptyConstructor,
+    MessageServiceConstructor, MessagesDialogs, MessagesDialogsConstructor,
+    MessagesDialogsSliceConstructor, Peer, PeerChatConstructor, PeerNotifySettings,
+    PeerNotifySettingsConstructor, True, TrueConstructor, User, Vector, VectorConstructor,
 };
 
 fn flag(on: bool) -> Option<Box<True>> {
@@ -123,6 +125,153 @@ fn chat_dialog(chat_id: i64) -> Dialog {
         folder_id: None,
         ttl_period: None,
     })
+}
+
+fn service_message(chat_id: i64, id: i32, date: i32) -> Message {
+    Message::MessageService(MessageServiceConstructor {
+        flags: 0,
+        out: None,
+        mentioned: None,
+        media_unread: None,
+        reactions_are_possible: None,
+        silent: None,
+        post: None,
+        legacy: None,
+        id,
+        from_id: None,
+        peer_id: Box::new(Peer::PeerChat(PeerChatConstructor { chat_id })),
+        saved_peer_id: None,
+        reply_to: None,
+        date,
+        action: Box::new(MessageAction::MessageActionEmpty(
+            MessageActionEmptyConstructor {},
+        )),
+        reactions: None,
+        ttl_period: None,
+    })
+}
+
+#[test]
+fn dialogs_page_continues_from_raw_slice_but_not_full_response() {
+    let mut dialogs = (1..=39).map(chat_dialog).collect::<Vec<_>>();
+    dialogs.push(Dialog::DialogFolder(DialogFolderConstructor {
+        flags: 0,
+        pinned: None,
+        folder: Box::new(Folder::Folder(FolderConstructor {
+            flags: 0,
+            autofill_new_broadcasts: None,
+            autofill_public_groups: None,
+            autofill_new_correspondents: None,
+            id: 1,
+            title: "Archive".into(),
+            photo: None,
+        })),
+        peer: Box::new(Peer::PeerChat(PeerChatConstructor { chat_id: 90 })),
+        top_message: 1,
+        unread_muted_peers_count: 0,
+        unread_unmuted_peers_count: 0,
+        unread_muted_messages_count: 0,
+        unread_unmuted_messages_count: 0,
+    }));
+    let mut peers = HashMap::new();
+    let mut media = crate::media::MediaIndex::default();
+    let mut channel_pts = HashMap::new();
+    let first = get_dialogs::map_dialogs_page(
+        MessagesDialogs::MessagesDialogsSlice(MessagesDialogsSliceConstructor {
+            count: 80,
+            dialogs: boxed_vec(dialogs),
+            messages: boxed_vec(vec![
+                service_message(39, 1, 100),
+                service_message(39, 2, 300),
+                service_message(90, 1, 400),
+            ]),
+            chats: boxed_vec((1..=39).map(|id| group(id, false, false)).collect()),
+            users: boxed_vec(vec![]),
+        }),
+        &mut peers,
+        &mut media,
+        &mut channel_pts,
+    )
+    .expect("slice");
+    assert!(first.is_slice);
+    assert_eq!(first.raw_count, 40);
+    assert_eq!(first.chats.len(), 39);
+    assert_eq!(
+        first.next_cursor,
+        Some(crate::DialogsCursorDto {
+            offset_date: 100,
+            offset_id: 1,
+            offset_peer_id: -39,
+        }),
+    );
+
+    let last = get_dialogs::map_dialogs_page(
+        MessagesDialogs::MessagesDialogs(MessagesDialogsConstructor {
+            dialogs: boxed_vec((40..80).map(chat_dialog).collect()),
+            messages: boxed_vec(vec![service_message(79, 1, 50)]),
+            chats: boxed_vec((40..80).map(|id| group(id, false, false)).collect()),
+            users: boxed_vec(vec![]),
+        }),
+        &mut peers,
+        &mut media,
+        &mut channel_pts,
+    )
+    .expect("full response");
+    assert!(!last.is_slice);
+    assert_eq!(last.raw_count, 40);
+    assert_eq!(last.chats.len(), 40);
+    assert_eq!(last.next_cursor, None);
+}
+
+#[test]
+fn first_dialogs_page_requires_pinned_dialogs_after_get_dialogs_succeeds() {
+    let mut peers = HashMap::new();
+    let mut media = crate::media::MediaIndex::default();
+    let mut channel_pts = HashMap::new();
+    let page = get_dialogs::map_dialogs_page(
+        MessagesDialogs::MessagesDialogs(MessagesDialogsConstructor {
+            dialogs: boxed_vec(vec![chat_dialog(11)]),
+            messages: boxed_vec(vec![]),
+            chats: boxed_vec(vec![basic_group(false, false)]),
+            users: boxed_vec(vec![]),
+        }),
+        &mut peers,
+        &mut media,
+        &mut channel_pts,
+    )
+    .expect("getDialogs success");
+    let first = crate::DialogsCursorDto {
+        offset_date: 0,
+        offset_id: 0,
+        offset_peer_id: 0,
+    };
+    let error = get_dialogs::finish_dialogs_page(page.clone(), first, || {
+        Err(crate::MtprotoError::Message(
+            "RPC 420: FLOOD_WAIT_17".into(),
+        ))
+    })
+    .expect_err("required pinned dialogs failed");
+    assert_eq!(error.to_string(), "RPC 420: FLOOD_WAIT_17");
+
+    let pinned = map_peer_dialogs(
+        &mut peers,
+        &mut media,
+        &mut channel_pts,
+        boxed_vec(vec![chat_dialog(12)]),
+        boxed_vec(vec![]),
+        boxed_vec(vec![group(12, false, false)]),
+        boxed_vec(vec![]),
+    );
+    let complete =
+        get_dialogs::finish_dialogs_page(page, first, || Ok(pinned)).expect("both RPCs succeeded");
+    assert_eq!(complete.raw_count, 1);
+    assert_eq!(complete.next_cursor, None);
+    let rows: Vec<_> = complete
+        .chats
+        .iter()
+        .map(|chat| (chat.id, chat.pinned))
+        .collect();
+    assert_eq!(rows, [(-12, true), (-11, false)]);
 }
 
 #[test]

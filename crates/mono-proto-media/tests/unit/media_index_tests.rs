@@ -1,6 +1,73 @@
 use super::*;
 
 #[test]
+fn chat_photo_display_prefers_bounded_x_even_when_it_is_full() {
+    use crate::location::{MediaDownloadKind, media_for_download};
+    use mono_proto::latest::api::{
+        MessageMediaPhotoConstructor, PhotoConstructor, PhotoSizeConstructor, Vector,
+        VectorConstructor,
+    };
+
+    for (renditions, expected_full, expected_display) in [
+        (
+            vec![("s", 90), ("m", 320), ("x", 800), ("y", 1280)],
+            "y",
+            Some("x"),
+        ),
+        (vec![("s", 90), ("m", 320), ("x", 800)], "x", Some("x")),
+        (vec![("s", 90), ("m", 320), ("x", 801)], "x", Some("s")),
+        (vec![("w", 2560)], "w", None),
+    ] {
+        let media = MessageMedia::MessageMediaPhoto(MessageMediaPhotoConstructor {
+            flags: 0,
+            spoiler: None,
+            live_photo: None,
+            photo: Some(Box::new(Photo::Photo(PhotoConstructor {
+                flags: 0,
+                has_stickers: None,
+                id: 7,
+                access_hash: 1,
+                file_reference: vec![1],
+                date: 0,
+                sizes: Box::new(Vector::Vector(VectorConstructor {
+                    field_0: renditions.len() as u32,
+                    field_1: renditions
+                        .into_iter()
+                        .map(|(ty, w)| {
+                            Box::new(PhotoSize::PhotoSize(PhotoSizeConstructor {
+                                type_: ty.into(),
+                                w,
+                                h: w / 2,
+                                size: 1000,
+                            }))
+                        })
+                        .collect(),
+                })),
+                video_sizes: None,
+                dc_id: 2,
+            }))),
+            ttl_seconds: None,
+            video: None,
+        });
+        let (indexed, _) = extract_from_media(&media).unwrap();
+        assert_eq!(indexed.cache_key, "photo:7");
+        assert!(
+            matches!(&indexed.location, MediaLocation::Photo { thumb_size, .. } if thumb_size == expected_full)
+        );
+        let display = media_for_download(&indexed, MediaDownloadKind::Display);
+        if let Some(expected) = expected_display {
+            let display = display.unwrap();
+            assert_eq!(display.cache_key, "photo:7:display");
+            assert!(
+                matches!(&display.location, MediaLocation::Photo { thumb_size, .. } if thumb_size == expected)
+            );
+        } else {
+            assert!(display.is_err());
+        }
+    }
+}
+
+#[test]
 fn resolved_static_avatar_classification_requires_exact_peer_cache_identity() {
     let mut entry = media_ref_peer_photo(
         crate::peers::PeerKind::User,

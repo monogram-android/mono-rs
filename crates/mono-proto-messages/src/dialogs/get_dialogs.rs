@@ -17,10 +17,10 @@ use crate::emoji_status::emoji_status_document_id;
 use crate::media::{self, MediaIndex};
 use crate::peers::{
     self, CachedPeer, chat_id_for_channel, chat_id_for_chat, chat_id_for_user,
-    input_peer_from_cached, peer_chat_id, vector_boxed_items,
+    input_peer_from_cached, peer_chat_id, vector_boxed_items, vector_items,
 };
 use crate::presence::user_status_parts;
-use crate::{ChatDto, MtprotoError};
+use crate::{ChatDto, DialogsCursorDto, DialogsPageDto, MtprotoError};
 
 pub fn is_muted(settings: &PeerNotifySettings) -> bool {
     let PeerNotifySettings::PeerNotifySettings(s) = settings else {
@@ -55,6 +55,31 @@ pub fn get_dialogs(
     offset_peer_id: i64,
     folder_id: Option<i32>,
 ) -> Result<Vec<ChatDto>, MtprotoError> {
+    get_dialogs_page(
+        snapshot,
+        api_id,
+        peers,
+        media_index,
+        channel_pts,
+        offset_date,
+        offset_id,
+        offset_peer_id,
+        folder_id,
+    )
+    .map(|page| page.chats)
+}
+
+pub fn get_dialogs_page(
+    snapshot: &mut Snapshot,
+    api_id: i32,
+    peers: &mut HashMap<i64, CachedPeer>,
+    media_index: &mut MediaIndex,
+    channel_pts: &mut HashMap<i64, i32>,
+    offset_date: i32,
+    offset_id: i32,
+    offset_peer_id: i64,
+    folder_id: Option<i32>,
+) -> Result<DialogsPageDto, MtprotoError> {
     let offset_peer = if offset_peer_id == 0 {
         InputPeer::InputPeerEmpty(InputPeerEmptyConstructor {})
     } else {
@@ -75,15 +100,63 @@ pub fn get_dialogs(
         hash: 0,
     };
     let response: MessagesDialogs = api_invoke::invoke_api(snapshot, api_id, request)?;
-    let (dialogs, messages, chats, users) = match response {
-        MessagesDialogs::MessagesDialogs(d) => (d.dialogs, d.messages, d.chats, d.users),
-        MessagesDialogs::MessagesDialogsSlice(d) => (d.dialogs, d.messages, d.chats, d.users),
-        MessagesDialogs::MessagesDialogsNotModified(_) => {
-            return Ok(Vec::new());
-        }
+    if matches!(response, MessagesDialogs::MessagesDialogsNotModified(_)) {
+        return Ok(DialogsPageDto::default());
+    }
+    let page = map_dialogs_page(response, peers, media_index, channel_pts)?;
+    finish_dialogs_page(
+        page,
+        DialogsCursorDto {
+            offset_date,
+            offset_id,
+            offset_peer_id,
+        },
+        || {
+            fetch_pinned_dialogs(
+                snapshot,
+                api_id,
+                peers,
+                media_index,
+                channel_pts,
+                folder_id.unwrap_or(0),
+            )
+        },
+    )
+}
+
+pub(super) fn finish_dialogs_page(
+    mut page: DialogsPageDto,
+    offset: DialogsCursorDto,
+    fetch_pinned: impl FnOnce() -> Result<Vec<ChatDto>, MtprotoError>,
+) -> Result<DialogsPageDto, MtprotoError> {
+    if page.next_cursor == Some(offset) {
+        page.next_cursor = None;
+    }
+    if offset.offset_date == 0 && offset.offset_id == 0 && offset.offset_peer_id == 0 {
+        page.chats = merge_pinned_prefix(fetch_pinned()?, page.chats);
+    }
+    Ok(page)
+}
+
+pub(super) fn map_dialogs_page(
+    response: MessagesDialogs,
+    peers: &mut HashMap<i64, CachedPeer>,
+    media_index: &mut MediaIndex,
+    channel_pts: &mut HashMap<i64, i32>,
+) -> Result<DialogsPageDto, MtprotoError> {
+    let (dialogs, messages, chats, users, is_slice) = match response {
+        MessagesDialogs::MessagesDialogs(d) => (d.dialogs, d.messages, d.chats, d.users, false),
+        MessagesDialogs::MessagesDialogsSlice(d) => (d.dialogs, d.messages, d.chats, d.users, true),
+        MessagesDialogs::MessagesDialogsNotModified(_) => return Ok(DialogsPageDto::default()),
         _ => return Err(MtprotoError::Message("unexpected messages.dialogs".into())),
     };
-    let mut out = map_peer_dialogs(
+    let raw_count = vector_items(&dialogs).len() as i32;
+    let next_cursor = if is_slice {
+        raw_dialogs_cursor(&dialogs, &messages)
+    } else {
+        None
+    };
+    let chats = map_peer_dialogs(
         peers,
         media_index,
         channel_pts,
@@ -92,21 +165,47 @@ pub fn get_dialogs(
         chats,
         users,
     );
-    if offset_date == 0
-        && offset_id == 0
-        && offset_peer_id == 0
-        && let Ok(pinned) = fetch_pinned_dialogs(
-            snapshot,
-            api_id,
-            peers,
-            media_index,
-            channel_pts,
-            folder_id.unwrap_or(0),
-        )
-    {
-        out = merge_pinned_prefix(pinned, out);
+    Ok(DialogsPageDto {
+        chats,
+        raw_count,
+        next_cursor,
+        is_slice,
+    })
+}
+
+fn raw_dialogs_cursor(
+    dialogs: &Vector<Box<Dialog>>,
+    messages: &Vector<Box<Message>>,
+) -> Option<DialogsCursorDto> {
+    let mut dates = HashMap::new();
+    for message in vector_boxed_items(messages) {
+        let (peer, id, date) = match message {
+            Message::Message(m) => (&m.peer_id, m.id, m.date),
+            Message::MessageService(m) => (&m.peer_id, m.id, m.date),
+            _ => continue,
+        };
+        if id > 0 && date > 0 {
+            dates.insert((peer_chat_id(peer), id), date);
+        }
     }
-    Ok(out)
+    // A folder entry is not a dialog position in this list. Use the last raw peer dialog
+    // with a dated top message, even if mapping omits that dialog or picks another preview.
+    vector_items(dialogs).iter().rev().find_map(|dialog| {
+        let Dialog::Dialog(dialog) = dialog.as_ref() else {
+            return None;
+        };
+        let offset_peer_id = peer_chat_id(&dialog.peer);
+        if offset_peer_id == 0 {
+            return None;
+        }
+        let offset_id = dialog.top_message;
+        let offset_date = *dates.get(&(offset_peer_id, offset_id))?;
+        Some(DialogsCursorDto {
+            offset_date,
+            offset_id,
+            offset_peer_id,
+        })
+    })
 }
 
 fn fetch_pinned_dialogs(
@@ -369,9 +468,8 @@ pub fn merge_pinned_prefix(pinned: Vec<ChatDto>, rest: Vec<ChatDto>) -> Vec<Chat
     out
 }
 
-/// Dialog `pts` is the last channel cursor supplied with the dialog list.
-/// Keep only positive, monotonic values so an older page cannot rewind a
-/// recovered channel before `updates.getChannelDifference` runs.
+/// Dialog and pin snapshots can seed unknown channels, but do not apply the
+/// updates needed to advance a known cursor.
 pub fn merge_channel_pts(
     channel_pts: &mut HashMap<i64, i32>,
     chat_id: i64,
@@ -380,8 +478,5 @@ pub fn merge_channel_pts(
     let Some(dialog_pts) = dialog_pts.filter(|pts| *pts > 0) else {
         return;
     };
-    channel_pts
-        .entry(chat_id)
-        .and_modify(|current| *current = (*current).max(dialog_pts))
-        .or_insert(dialog_pts);
+    channel_pts.entry(chat_id).or_insert(dialog_pts);
 }

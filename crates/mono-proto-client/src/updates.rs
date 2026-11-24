@@ -21,7 +21,7 @@ use crate::session::{
     apply_home_auth, call_with_migrate, ensure_auth_key_on, expire_temporary_lane,
     is_unrecoverable_session, mark_lane_session_dead, temporary_key_retry_error,
 };
-use crate::state::ClientState;
+use crate::state::{ClientData, ClientState};
 use mono_proto_runtime::{request_control, scheduler, tcp};
 use mono_proto_storage::client_session::ChannelRecovery;
 use mono_proto_storage::update_journal::{DurableBatch, is_durable};
@@ -34,6 +34,7 @@ use mono_proto_types::updates_state::UpdatesStateDto;
 use mono_proto_updates::{recovery::*, rpc as updates_rpc};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 struct ActiveUpdateRequest<'a>(&'a AtomicU64);
 
@@ -89,7 +90,7 @@ struct AppliedDrain {
     recovery: VecDeque<ChannelRecovery>,
     seen_messages: HashSet<(i64, i32)>,
     lazy_queue: HashSet<i64>,
-    lazy_retry_at: u64,
+    lazy_retry_at: Option<(Instant, Duration)>,
     stopped_channel: Option<i64>,
     cursor: Option<UpdatesStateDto>,
 }
@@ -352,7 +353,54 @@ fn filter_update_events(events: &mut Vec<UpdateEventDto>, seen_messages: &mut Ha
     });
 }
 
+fn lazy_retry_due(deadline: Option<(Instant, Duration)>, now: Instant) -> bool {
+    deadline.is_none_or(|(received, wait)| now.saturating_duration_since(received) >= wait)
+}
+
+fn lazy_retry_deadline(received: Instant, error: Option<&MtprotoError>) -> (Instant, Duration) {
+    (
+        received,
+        Duration::from_secs(error.map_or(5, recovery_wait_secs)),
+    )
+}
+
 pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
+    drain_updates_with(
+        handle,
+        recovery_now,
+        Instant::now,
+        updates_rpc::get_updates_state,
+        updates_rpc::drain_difference,
+        updates_rpc::drain_channel_difference,
+    )
+}
+
+fn drain_updates_with(
+    handle: u64,
+    wall_now: impl Fn() -> u64,
+    monotonic_now: impl Fn() -> Instant,
+    get_updates_state: impl FnOnce(
+        &mut mono_proto_session::Snapshot,
+        i32,
+    ) -> Result<UpdatesStateDto, MtprotoError>,
+    drain_difference: impl FnOnce(
+        &mut mono_proto_session::Snapshot,
+        i32,
+        &mut HashMap<i64, mono_proto_types::peers::CachedPeer>,
+        &mut mono_proto_media::media::MediaIndex,
+        &mut UpdatesStateDto,
+        &mut Vec<i64>,
+    ) -> Result<(Vec<UpdateEventDto>, bool), MtprotoError>,
+    mut drain_channel_difference: impl FnMut(
+        &mut mono_proto_session::Snapshot,
+        i32,
+        &mut HashMap<i64, mono_proto_types::peers::CachedPeer>,
+        &mut mono_proto_media::media::MediaIndex,
+        i64,
+        i32,
+    )
+        -> Result<updates_rpc::ChannelDifferencePage, MtprotoError>,
+) -> Result<UpdateDrainDto, MtprotoError> {
     let client = get_client(handle)?;
     if interactive_request_pending(&client) {
         return Ok(UpdateDrainDto::default());
@@ -385,7 +433,12 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         .active_update_request
         .store(active_request, Ordering::Release);
     let _active_request = ActiveUpdateRequest(&client.active_update_request);
-    let now = recovery_now();
+    let expire_channel_flood_waits = |d: &mut ClientData| {
+        let now = monotonic_now();
+        d.channel_flood_waits
+            .retain(|_, (received, wait)| now.saturating_duration_since(*received) < *wait);
+    };
+    let now = wall_now();
     let (
         api_id,
         previous,
@@ -398,7 +451,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         due_recovery,
         lazy_pending,
     ) = {
-        let d = client.data.lock();
+        let mut d = client.data.lock();
         if d.session_dead {
             return Err(MtprotoError::Message(format!(
                 "session invalidated: {}",
@@ -408,6 +461,13 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         if d.user_id.is_none() || !d.updates_started {
             return Ok(UpdateDrainDto::default());
         }
+        if let Some((started, wait)) = d.difference_flood_wait {
+            if monotonic_now().saturating_duration_since(started) < wait {
+                return Ok(UpdateDrainDto::default());
+            }
+            d.difference_flood_wait = None;
+        }
+        expire_channel_flood_waits(&mut d);
         (
             d.api_id,
             d.updates.clone(),
@@ -423,6 +483,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                 &d.lazy_sync_exceptions,
                 d.lazy_channel_updates,
                 now,
+                |chat_id| !d.channel_flood_waits.contains_key(&chat_id),
             )
             .is_some()
                 || (channel_id_from_chat_id(d.last_history_chat_id).is_some()
@@ -430,7 +491,9 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                         .channel_recovery
                         .iter()
                         .any(|entry| entry.chat_id == d.last_history_chat_id)),
-            d.lazy_channel_updates && !d.lazy_channel_recovery.is_empty() && d.lazy_retry_at <= now,
+            d.lazy_channel_updates
+                && !d.lazy_channel_recovery.is_empty()
+                && lazy_retry_due(d.lazy_retry_at, monotonic_now()),
         )
     };
     crate::bind_temp::ensure_main_temp(&client, &mut io, false)?;
@@ -448,16 +511,25 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
             .last_difference
             .map(|last| last.elapsed() >= std::time::Duration::from_secs(60))
             .unwrap_or(true);
+    let record_flood_wait = |io: &mut SessionIo, error: &MtprotoError| {
+        if let Some(wait) = mono_proto_media::download::flood_wait_secs(error) {
+            client.data.lock().difference_flood_wait =
+                Some((monotonic_now(), Duration::from_secs(wait)));
+            // An interactive RPC can reopen the transport before the next drain.
+            io.last_difference = None;
+        }
+    };
     let mut slot = io.transport.take();
     mono_proto_runtime::rpc::clear_new_session_metadata();
     let drained = with_client_transport(&client, &mut slot, || {
         // Receive stays on the idle budget; recovery RPCs use their own 8s scope
         // so a waiting interactive caller can take the lane between pages.
         ensure_auth_key_on(&mut io.snapshot)?;
-        let mut cursor = previous.clone();
-        if cursor.is_none() {
-            cursor = Some(updates_rpc::get_updates_state(&mut io.snapshot, api_id)?);
-        }
+        let cursor = match previous.clone() {
+            Some(cursor) => cursor,
+            None => get_updates_state(&mut io.snapshot, api_id)
+                .inspect_err(|error| record_flood_wait(&mut io, error))?,
+        };
         if !needs_difference {
             let _span = mono_proto_media::perf::span("updates.receive");
             let pushes = mono_proto_runtime::rpc::receive_updates(&mut io.snapshot)?;
@@ -505,7 +577,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
         }
         let before_peers = peers.clone();
         let before_media = media.clone();
-        let mut live = cursor.clone().unwrap();
+        let mut live = cursor;
         let mut pending_channels = Vec::new();
         let mut stopped_channel = None;
         let mut events = Vec::new();
@@ -573,7 +645,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
             sync.start(client.data.lock().is_syncing, &mut events);
             let _span = mono_proto_media::perf::span("updates.difference");
             let (page, has_more) = mono_proto_runtime::rpc::with_rpc_timeout_secs(8, || {
-                updates_rpc::drain_difference(
+                drain_difference(
                     &mut io.snapshot,
                     api_id,
                     &mut peers,
@@ -581,14 +653,15 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                     &mut live,
                     &mut pending_channels,
                 )
-            })?;
+            })
+            .inspect_err(|error| record_flood_wait(&mut io, error))?;
             // The difference is authoritative for the cursor. Discard
             // packets retained behind the gap before using the new state.
             io.pending_push = Default::default();
             events.extend(page);
             io.last_difference = (!has_more).then(std::time::Instant::now);
         }
-        let now = recovery_now();
+        let now = wall_now();
         let pending_channels = route_lazy_channels(
             pending_channels,
             open_chat,
@@ -614,12 +687,22 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
             {
                 break;
             }
-            let Some(index) =
-                next_channel_recovery(&recovery, open_chat, &lazy_exceptions, lazy_enabled, now)
-            else {
+            let index = {
+                let mut d = client.data.lock();
+                expire_channel_flood_waits(&mut d);
+                next_channel_recovery(
+                    &recovery,
+                    open_chat,
+                    &lazy_exceptions,
+                    lazy_enabled,
+                    now,
+                    |chat_id| !d.channel_flood_waits.contains_key(&chat_id),
+                )
+            };
+            let Some(index) = index else {
                 break;
             };
-            let entry = recovery.remove(index).unwrap();
+            let mut entry = recovery.remove(index).unwrap();
             if !entry.watching {
                 sync.start(client.data.lock().is_syncing, &mut events);
             }
@@ -627,7 +710,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
             let pts = channel_pts.get(&chat_id).copied().unwrap_or(1);
             let _span = mono_proto_media::perf::span("updates.channel_diff");
             match mono_proto_runtime::rpc::with_rpc_timeout_secs(8, || {
-                updates_rpc::drain_channel_difference(
+                drain_channel_difference(
                     &mut io.snapshot,
                     api_id,
                     &mut peers,
@@ -661,7 +744,19 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                         return Err(err);
                     }
                     if !terminal_channel_error(&err) {
-                        defer_channel_recovery(&mut recovery, entry, &err, recovery_now());
+                        if let Some(wait) = mono_proto_media::download::flood_wait_secs(&err) {
+                            let received = monotonic_now();
+                            client
+                                .data
+                                .lock()
+                                .channel_flood_waits
+                                .insert(chat_id, (received, Duration::from_secs(wait.max(5))));
+                            // Only the monotonic gate controls flood retry eligibility.
+                            entry.due_at = 0;
+                        } else {
+                            entry.due_at = wall_now().saturating_add(recovery_wait_secs(&err));
+                        }
+                        recovery.push_back(entry);
                     } else {
                         lazy_queue.remove(&chat_id);
                         if chat_id == open_chat {
@@ -682,9 +777,9 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                 open_chat
             },
             &lazy_exceptions,
-            recovery_now(),
+            wall_now(),
         );
-        let lazy_batch = if lazy_retry_at <= recovery_now()
+        let lazy_batch = if lazy_retry_due(lazy_retry_at, monotonic_now())
             && !interactive_request_pending(&client)
             && !defer_recovery
             && !needs_difference
@@ -710,7 +805,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                 )
             }) {
                 Ok(page) => {
-                    lazy_retry_at = recovery_now().saturating_add(5);
+                    lazy_retry_at = Some(lazy_retry_deadline(monotonic_now(), None));
                     restore_lazy_batch(&mut lazy_queue, &page.unresolved);
                     events.extend(lazy_dialog_events(page.chats));
                 }
@@ -722,7 +817,7 @@ pub fn drain_updates(handle: u64) -> Result<UpdateDrainDto, MtprotoError> {
                     if !terminal_channel_error(&err) {
                         restore_lazy_batch(&mut lazy_queue, &lazy_batch);
                     }
-                    lazy_retry_at = recovery_now().saturating_add(recovery_wait_secs(&err));
+                    lazy_retry_at = Some(lazy_retry_deadline(monotonic_now(), Some(&err)));
                     if plan.drop_transport {
                         mono_proto_runtime::rpc::drop_live_transport();
                     }

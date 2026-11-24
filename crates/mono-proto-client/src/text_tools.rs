@@ -87,8 +87,8 @@ impl TranslationMode {
         }
     }
 
-    pub fn is_enabled(self) -> bool {
-        !matches!(self, Self::Disabled)
+    pub fn supports_telegram_api(self) -> bool {
+        matches!(self, Self::Enabled)
     }
 }
 
@@ -101,11 +101,11 @@ pub struct TextToolsConfig {
 
 impl TextToolsConfig {
     pub fn manual_enabled(&self) -> bool {
-        self.translations_manual_enabled.is_enabled()
+        self.translations_manual_enabled.supports_telegram_api()
     }
 
     pub fn auto_enabled(&self) -> bool {
-        self.translations_auto_enabled.is_enabled()
+        self.translations_auto_enabled.supports_telegram_api()
     }
 
     /// Normalized `enabled|alternative|system|disabled` values for the bridge.
@@ -133,6 +133,7 @@ pub struct TextToolsAvailabilityDto {
     pub chat_translation: bool,
     pub peer_translations_disabled: bool,
     pub channel_auto_translation: bool,
+    pub peer_lookup_error: Option<String>,
 }
 
 fn vector<T>(items: Vec<T>) -> Box<Vector<T>> {
@@ -771,9 +772,12 @@ pub fn get_text_tools_config(handle: u64) -> Result<TextToolsConfigDto, MtprotoE
 }
 
 /// `translations_disabled` from the peer full info and `channel.autotranslation`
-/// for channels. Network failures degrade to "not restricted".
-fn fetch_peer_translation_flags(state: &mut ClientState, peer: &CachedPeer) -> (bool, bool) {
-    match peer.kind {
+/// for channels.
+fn fetch_peer_translation_flags(
+    state: &mut ClientState,
+    peer: &CachedPeer,
+) -> Result<(bool, bool), MtprotoError> {
+    Ok(match peer.kind {
         PeerKind::User => {
             let request = UsersGetFullUserRequest {
                 id: Box::new(InputUser::InputUser(InputUserConstructor {
@@ -781,22 +785,16 @@ fn fetch_peer_translation_flags(state: &mut ClientState, peer: &CachedPeer) -> (
                     access_hash: peer.access_hash,
                 })),
             };
-            let Ok(response) =
-                invoke_api::<_, UsersUserFull>(&mut state.snapshot, state.api_id, request)
-            else {
-                return (false, false);
-            };
+            let response =
+                invoke_api::<_, UsersUserFull>(&mut state.snapshot, state.api_id, request)?;
             let UsersUserFull::UsersUserFull(full) = response;
             let UserFull::UserFull(user) = *full.full_user;
             (user.translations_disabled.is_some(), false)
         }
         PeerKind::Chat => {
             let request = MessagesGetFullChatRequest { chat_id: peer.id };
-            let Ok(response) =
-                invoke_api::<_, MessagesChatFull>(&mut state.snapshot, state.api_id, request)
-            else {
-                return (false, false);
-            };
+            let response =
+                invoke_api::<_, MessagesChatFull>(&mut state.snapshot, state.api_id, request)?;
             let MessagesChatFull::MessagesChatFull(full) = response;
             match full.full_chat.as_ref() {
                 ChatFull::ChatFull(chat) => (chat.translations_disabled.is_some(), false),
@@ -811,11 +809,8 @@ fn fetch_peer_translation_flags(state: &mut ClientState, peer: &CachedPeer) -> (
                     access_hash: peer.access_hash,
                 })),
             };
-            let Ok(response) =
-                invoke_api::<_, MessagesChatFull>(&mut state.snapshot, state.api_id, request)
-            else {
-                return (false, false);
-            };
+            let response =
+                invoke_api::<_, MessagesChatFull>(&mut state.snapshot, state.api_id, request)?;
             let MessagesChatFull::MessagesChatFull(full) = response;
             let disabled = match full.full_chat.as_ref() {
                 ChatFull::ChannelFull(channel) => channel.translations_disabled.is_some(),
@@ -827,7 +822,7 @@ fn fetch_peer_translation_flags(state: &mut ClientState, peer: &CachedPeer) -> (
             });
             (disabled, auto)
         }
-    }
+    })
 }
 
 /// Manual/auto translation availability plus the per-chat restrictions the UI
@@ -847,22 +842,21 @@ pub fn get_text_tools_availability(
             Ok(config_from_app_config(&config))
         })
     })?;
-    let (peer_translations_disabled, channel_auto_translation) =
-        with_client_mut(handle, |state| {
-            ensure_ready(state)?;
-            let peer = match require_usable_peer(&state.peers, chat_id) {
-                Ok(peer) => peer.clone(),
-                Err(_) => return Ok((false, false)),
-            };
-            call_with_migrate(state, |state| {
-                Ok(fetch_peer_translation_flags(state, &peer))
-            })
-        })?;
+    let flags = with_client_mut(handle, |state| {
+        ensure_ready(state)?;
+        let peer = require_usable_peer(&state.peers, chat_id)?.clone();
+        call_with_migrate(state, |state| fetch_peer_translation_flags(state, &peer))
+    });
+    let (peer_translations_disabled, channel_auto_translation, peer_lookup_error) = match flags {
+        Ok((disabled, auto)) => (disabled, auto, None),
+        Err(error) => (false, false, Some(error.to_string())),
+    };
     Ok(TextToolsAvailabilityDto {
         manual_translation: config.manual_enabled(),
-        chat_translation: config.auto_enabled() || config.manual_enabled(),
+        chat_translation: config.auto_enabled(),
         peer_translations_disabled,
         channel_auto_translation,
+        peer_lookup_error,
     })
 }
 

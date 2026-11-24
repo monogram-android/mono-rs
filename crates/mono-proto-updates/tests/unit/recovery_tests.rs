@@ -8,11 +8,11 @@ fn active_channel_is_scheduled_before_other_due_channels() {
     let mut queue = VecDeque::new();
     prepare_channel_recovery(&mut queue, vec![other, active], active, 100);
     assert_eq!(
-        next_channel_recovery(&queue, active, &HashSet::default(), false, 99),
+        next_channel_recovery(&queue, active, &HashSet::default(), false, 99, |_| true),
         None
     );
     assert_eq!(
-        next_channel_recovery(&queue, active, &HashSet::default(), false, 100),
+        next_channel_recovery(&queue, active, &HashSet::default(), false, 100, |_| true),
         Some(1)
     );
 }

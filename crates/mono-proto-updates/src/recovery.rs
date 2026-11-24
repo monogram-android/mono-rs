@@ -17,16 +17,6 @@ pub fn recovery_now() -> u64 {
         .as_secs()
 }
 
-pub fn defer_channel_recovery(
-    queue: &mut VecDeque<ChannelRecovery>,
-    mut entry: ChannelRecovery,
-    error: &MtprotoError,
-    now: u64,
-) {
-    entry.due_at = now.saturating_add(recovery_wait_secs(error));
-    queue.push_back(entry);
-}
-
 pub fn terminal_channel_error(error: &MtprotoError) -> bool {
     matches!(error, MtprotoError::Message(message) if
         message.contains("CHANNEL_PRIVATE") || message.contains("CHANNEL_INVALID")
@@ -156,10 +146,11 @@ pub fn next_channel_recovery(
     exceptions: &HashSet<i64>,
     lazy: bool,
     now: u64,
+    can_request: impl Fn(i64) -> bool,
 ) -> Option<usize> {
     let mut first_eligible = None;
     for (index, entry) in recovery.iter().enumerate() {
-        if entry.due_at > now {
+        if entry.due_at > now || !can_request(entry.chat_id) {
             continue;
         }
         let priority = ChannelPriority::for_chat(entry.chat_id, open_chat, exceptions);

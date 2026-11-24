@@ -98,13 +98,17 @@ fn refresh_message_media_unknown_peer_fails_before_rpc() {
 use super::merge_channel_pts;
 
 #[test]
-fn dialog_pts_seed_is_positive_and_monotonic() {
-    let mut cursors = HashMap::from_iter([(42_i64, 80_i32)]);
+fn dialog_pts_only_seeds_unknown_channels_with_positive_values() {
+    let mut cursors = HashMap::from_iter([(42_i64, 100_i32)]);
 
-    merge_channel_pts(&mut cursors, 42, Some(64));
-    merge_channel_pts(&mut cursors, 42, Some(96));
-    merge_channel_pts(&mut cursors, 42, Some(0));
-    merge_channel_pts(&mut cursors, 42, None);
+    merge_channel_pts(&mut cursors, 42, Some(105));
+    merge_channel_pts(&mut cursors, 42, Some(95));
+    merge_channel_pts(&mut cursors, 43, None);
+    merge_channel_pts(&mut cursors, 43, Some(0));
+    merge_channel_pts(&mut cursors, 43, Some(-1));
+    assert_eq!(cursors, HashMap::from_iter([(42, 100)]));
 
-    assert_eq!(cursors.get(&42), Some(&96));
+    merge_channel_pts(&mut cursors, 43, Some(105));
+    merge_channel_pts(&mut cursors, 43, Some(110));
+    assert_eq!(cursors, HashMap::from_iter([(42, 100), (43, 105)]));
 }

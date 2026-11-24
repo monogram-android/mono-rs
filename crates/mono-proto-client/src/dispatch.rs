@@ -1,5 +1,5 @@
 use crate::{
-    ChatDto, FolderDto, ForumTopicsPageDto, JoinChatDto, MessageDto, MtprotoError,
+    ChatDto, DialogsPageDto, FolderDto, ForumTopicsPageDto, JoinChatDto, MessageDto, MtprotoError,
     NotifyExceptionDto, NotifySettingsDto, ProfileDto,
 };
 use mono_proto_messages::dialogs;
@@ -17,10 +17,14 @@ use crate::state::ClientState;
 use std::sync::Arc;
 
 pub fn get_chats(handle: u64) -> Result<Vec<ChatDto>, MtprotoError> {
+    get_chats_page(handle).map(|page| page.chats)
+}
+
+pub fn get_chats_page(handle: u64) -> Result<DialogsPageDto, MtprotoError> {
     with_read_lane(handle, |state| {
-        let chats = mono_proto_runtime::rpc::with_rpc_timeout_secs(8, || {
+        mono_proto_runtime::rpc::with_rpc_timeout_secs(8, || {
             call_with_migrate(state, |state| {
-                dialogs::get_dialogs(
+                dialogs::get_dialogs_page(
                     &mut state.snapshot,
                     state.api_id,
                     &mut state.peers,
@@ -32,8 +36,7 @@ pub fn get_chats(handle: u64) -> Result<Vec<ChatDto>, MtprotoError> {
                     None,
                 )
             })
-        })?;
-        Ok(chats)
+        })
     })
 }
 
@@ -203,10 +206,21 @@ pub fn load_more_chats(
     offset_peer_id: i64,
     folder_id: i32,
 ) -> Result<Vec<ChatDto>, MtprotoError> {
+    load_more_chats_page(handle, offset_date, offset_id, offset_peer_id, folder_id)
+        .map(|page| page.chats)
+}
+
+pub fn load_more_chats_page(
+    handle: u64,
+    offset_date: i32,
+    offset_id: i32,
+    offset_peer_id: i64,
+    folder_id: i32,
+) -> Result<DialogsPageDto, MtprotoError> {
     with_read_lane(handle, |state| {
-        let chats = call_with_migrate(state, |state| {
+        call_with_migrate(state, |state| {
             with_peer_refresh(state, offset_peer_id, |state| {
-                dialogs::get_dialogs(
+                dialogs::get_dialogs_page(
                     &mut state.snapshot,
                     state.api_id,
                     &mut state.peers,
@@ -219,8 +233,7 @@ pub fn load_more_chats(
                     (folder_id > 0).then_some(folder_id),
                 )
             })
-        })?;
-        Ok(chats)
+        })
     })
 }
 

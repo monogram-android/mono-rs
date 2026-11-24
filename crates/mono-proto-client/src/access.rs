@@ -224,6 +224,7 @@ pub fn with_client_mut_binding<T>(
             d.updates = state.updates;
             d.channel_pts = state.channel_pts;
             d.channel_recovery = state.channel_recovery;
+            d.channel_flood_waits.clear();
             d.seen_messages = state.seen_messages;
             d.updates_started = state.updates_started;
             if before_user_id.is_some() {

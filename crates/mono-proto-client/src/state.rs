@@ -8,6 +8,7 @@ use mono_proto_types::updates_state::UpdatesStateDto;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub struct ClientData {
     pub api_id: i32,
@@ -18,12 +19,15 @@ pub struct ClientData {
     pub updates: Option<UpdatesStateDto>,
     pub media: MediaIndex,
     pub updates_started: bool,
+    pub difference_flood_wait: Option<(std::time::Instant, std::time::Duration)>,
     pub session_dead: bool,
     /// Catalog token of the error that killed the session (`AUTH_KEY_DUPLICATED`).
     pub session_dead_reason: Option<String>,
     pub last_history_chat_id: i64,
     pub channel_pts: HashMap<i64, i32>,
     pub channel_recovery: VecDeque<ChannelRecovery>,
+    // Independent of queue entries, which can be promoted, dropped, or recreated.
+    pub channel_flood_waits: HashMap<i64, (Instant, Duration)>,
     pub seen_messages: HashSet<(i64, i32)>,
     pub logout_tokens: Vec<Vec<u8>>,
     pub new_session: Option<NewSessionMetadata>,
@@ -47,7 +51,7 @@ pub struct ClientData {
     pub lazy_sync_exceptions: HashSet<i64>,
     /// Optional metadata previews; gaps remain durable in `channel_recovery`.
     pub lazy_channel_recovery: HashSet<i64>,
-    pub lazy_retry_at: u64,
+    pub lazy_retry_at: Option<(Instant, Duration)>,
     pub journal: Arc<UpdateJournal>,
 }
 

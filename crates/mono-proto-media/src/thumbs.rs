@@ -150,36 +150,30 @@ pub fn pick_document_thumb_size(sizes: &[PhotoSize]) -> Option<(String, Option<V
     pick_inline_or_thumb_candidate(&collect_photo_sizes(sizes))
 }
 
-/// Chat-cell JPEG: `m` (~320). `x` only if `m` is already the thumb.
-/// https://core.telegram.org/api/files
-pub fn pick_display_candidate(
-    sizes: &[(String, i32, Option<Vec<u8>>)],
-    thumb_ty: Option<&str>,
-    full_ty: &str,
-) -> Option<(String, Option<Vec<u8>>)> {
-    let usable: Vec<&(String, i32, Option<Vec<u8>>)> = sizes
-        .iter()
-        .filter(|(ty, _, bytes)| is_usable_thumb(ty, bytes))
-        .collect();
-    for wanted in ["m", "s", "x"] {
-        if let Some((ty, _, bytes)) = usable.iter().find(|(ty, _, _)| ty == wanted)
-            && Some(ty.as_str()) != thumb_ty && ty != full_ty {
-                return Some((ty.clone(), bytes.clone()));
-            }
-    }
-    None
-}
-
+/// `x` is a server-resized rendition even when it is the largest available.
+/// https://core.telegram.org/api/files#photosize-type-values
 pub fn pick_display_size(
     sizes: &[PhotoSize],
     thumb_ty: Option<&str>,
     full_ty: &str,
 ) -> Option<(String, Option<Vec<u8>>)> {
-    let collected: Vec<(String, i32, Option<Vec<u8>>)> = sizes
+    sizes
         .iter()
-        .filter_map(|size| photo_size_type(size).map(|(ty, area, bytes, _, _)| (ty, area, bytes)))
-        .collect();
-    pick_display_candidate(&collected, thumb_ty, full_ty)
+        .filter_map(photo_size_type)
+        .filter_map(|(ty, _, bytes, w, h)| {
+            if !(1..=800).contains(&w) || !(1..=800).contains(&h) || Some(ty.as_str()) == thumb_ty {
+                return None;
+            }
+            let priority = match ty.as_str() {
+                "x" => 0,
+                "m" if ty != full_ty => 1,
+                "s" if ty != full_ty => 2,
+                _ => return None,
+            };
+            Some((priority, ty, bytes))
+        })
+        .min_by_key(|(priority, _, _)| *priority)
+        .map(|(_, ty, bytes)| (ty, bytes))
 }
 
 pub fn distinct_thumb_key(full_key: &str, full_ty: &str, thumb_ty: &str) -> String {

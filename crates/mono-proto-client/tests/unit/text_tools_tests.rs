@@ -331,8 +331,15 @@ fn translation_mode_parses_server_values() {
         TranslationMode::parse(Some("garbage")),
         TranslationMode::Enabled
     );
-    assert!(!TranslationMode::Disabled.is_enabled());
-    assert!(TranslationMode::System.is_enabled());
+    assert!(!TranslationMode::Disabled.supports_telegram_api());
+    for mode in ["system", "alternative"] {
+        let config = config_from_app_config(&app_config(vec![
+            ("translations_manual_enabled", "enabled"),
+            ("translations_auto_enabled", mode),
+        ]));
+        assert!(config.manual_enabled());
+        assert!(!config.auto_enabled());
+    }
     assert_eq!(TranslationMode::Alternative.as_str(), "alternative");
 }
 
@@ -373,7 +380,7 @@ fn config_from_app_config_reads_translation_modes() {
         TranslationMode::Alternative
     );
     assert_eq!(parsed.translations_auto_enabled, TranslationMode::Disabled);
-    assert!(parsed.manual_enabled());
+    assert!(!parsed.manual_enabled());
     assert!(!parsed.auto_enabled());
 }
 

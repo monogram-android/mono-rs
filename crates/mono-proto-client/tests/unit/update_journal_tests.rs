@@ -267,6 +267,387 @@ fn journal_survives_process_restart_and_is_replayable() {
 }
 
 #[test]
+fn dialog_refresh_before_channel_recovery_preserves_the_durable_gap() {
+    let path = temp_session("dialog-refresh-channel-gap");
+    let open_client = || create_client(1, "hash".into(), path.to_string_lossy().into());
+    let handle = open_client();
+    let client = get_client(handle).unwrap();
+    let chat_id = mono_proto_types::peers::chat_id_for_channel(7);
+    client.main.lock().snapshot.auth_key = Some(vec![1; 256]);
+    {
+        let mut data = client.data.lock();
+        data.home_auth_key = Some(vec![1; 256]);
+        data.user_id = Some(42);
+        data.updates = cursor(1);
+        data.channel_pts.insert(chat_id, 100);
+        data.last_history_chat_id = chat_id;
+    }
+    client
+        .policy
+        .main_session_allowance
+        .store(1, super::Ordering::Relaxed);
+    super::start_updates(handle).unwrap();
+    super::with_read_lane(handle, |state| {
+        mono_proto_messages::dialogs::merge_channel_pts(&mut state.channel_pts, chat_id, Some(105));
+        Ok(())
+    })
+    .unwrap();
+
+    let drain = |handle, expected_pts| {
+        let mut requests = Vec::new();
+        let result = super::drain_updates_with(
+            handle,
+            super::recovery_now,
+            std::time::Instant::now,
+            |_, _| panic!("unexpected bootstrap"),
+            |_, _, _, _, _, _| Ok((vec![], false)),
+            |_, _, _, _, requested_chat, pts| {
+                requests.push((requested_chat, pts));
+                let events = if pts == 100 {
+                    vec![UpdateEventDto::MessagesDeleted {
+                        chat_id: Some(chat_id),
+                        message_ids: vec![11, 12],
+                    }]
+                } else {
+                    vec![]
+                };
+                Ok(mono_proto_updates::rpc::ChannelDifferencePage {
+                    events,
+                    pts: 105,
+                    final_page: true,
+                    timeout: None,
+                    pending_channels: vec![],
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(requests, [(chat_id, expected_pts)]);
+        assert!(!result.replay_required);
+        result.batches
+    };
+    let assert_gap_batch = |batch: &mono_proto_types::dto::UpdateBatchDto| {
+        assert!(matches!(
+            batch.events.as_slice(),
+            [UpdateEventDto::MessagesDeleted { chat_id: Some(id), message_ids }]
+                if *id == chat_id && message_ids == &[11, 12]
+        ));
+        assert_eq!(batch.channel_pts_after.len(), 1);
+        assert_eq!(batch.channel_pts_after[0].chat_id, chat_id);
+        assert_eq!(batch.channel_pts_after[0].pts, 105);
+    };
+    let batches = drain(handle, 100);
+    assert_eq!(batches.len(), 1);
+    assert_gap_batch(&batches[0]);
+
+    // Reopen without a shutdown flush: the drain must already have saved the batch.
+    crate::registry::CLIENTS.lock().remove(&handle);
+    let restarted = open_client();
+    assert!(super::drain_updates(restarted).unwrap().replay_required);
+    let replay = pending_update_batches(restarted).unwrap();
+    assert_eq!(replay.len(), 1);
+    assert_eq!(replay[0].batch_id, batches[0].batch_id);
+    assert_gap_batch(&replay[0]);
+    acknowledge_update_batch(restarted, replay[0].account_generation, replay[0].batch_id).unwrap();
+    destroy_client(restarted);
+
+    let restarted = open_client();
+    assert!(pending_update_batches(restarted).unwrap().is_empty());
+    let client = get_client(restarted).unwrap();
+    {
+        let mut data = client.data.lock();
+        data.last_history_chat_id = chat_id;
+        data.channel_recovery.clear();
+    }
+    super::start_updates(restarted).unwrap();
+    assert!(drain(restarted, 105).is_empty());
+    assert!(pending_update_batches(restarted).unwrap().is_empty());
+    destroy_client(restarted);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn bootstrap_retries_only_after_the_flood_wait_deadline() {
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    let path = temp_session("bootstrap-flood-wait");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let client = get_client(handle).unwrap();
+    client.main.lock().snapshot.auth_key = Some(vec![1; 256]);
+    {
+        let mut data = client.data.lock();
+        data.home_auth_key = Some(vec![1; 256]);
+        data.user_id = Some(42);
+    }
+    client
+        .policy
+        .main_session_allowance
+        .store(1, super::Ordering::Relaxed);
+    super::start_updates(handle).unwrap();
+
+    let started = Instant::now();
+    let received = started + Duration::from_millis(250);
+    let now = Cell::new(started);
+    let requests = Cell::new(0);
+    let drain = || {
+        super::drain_updates_with(
+            handle,
+            super::recovery_now,
+            || now.get(),
+            |_, _| {
+                let request = requests.get();
+                requests.set(request + 1);
+                if request == 0 {
+                    now.set(received);
+                    return Err(super::MtprotoError::Message("FLOOD_WAIT_17".into()));
+                }
+                assert_eq!(now.get(), received + Duration::from_millis(17_000));
+                Ok(cursor(100).unwrap())
+            },
+            |_, _, _, _, live, _| {
+                assert_eq!(client.data.lock().updates, None);
+                assert_eq!(live.pts, 100);
+                live.pts = 105;
+                Ok((vec![message_event(11)], false))
+            },
+            |_, _, _, _, _, _| panic!("unexpected channel difference"),
+        )
+    };
+    assert!(matches!(
+        drain(),
+        Err(super::MtprotoError::Message(message)) if message == "FLOOD_WAIT_17"
+    ));
+    assert_eq!(client.data.lock().updates, None);
+
+    now.set(received + Duration::from_millis(16_999));
+    super::start_updates(handle).unwrap();
+    super::clear_active_dialog(handle).unwrap();
+    let pending = drain().unwrap();
+    assert!(!pending.replay_required);
+    assert!(pending.batches.is_empty());
+    assert!(pending_update_batches(handle).unwrap().is_empty());
+    assert_eq!(requests.get(), 1);
+    assert_eq!(client.data.lock().updates, None);
+
+    now.set(received + Duration::from_millis(17_000));
+    let recovered = drain().unwrap();
+    assert_eq!(requests.get(), 2);
+    assert_eq!(client.data.lock().updates, cursor(105));
+    assert_eq!(recovered.batches.len(), 1);
+    assert_eq!(recovered.batches[0].cursor_after, cursor(105));
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn account_difference_retries_only_after_the_flood_wait_deadline() {
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    let path = temp_session("account-difference-flood-wait");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let client = get_client(handle).unwrap();
+    client.main.lock().snapshot.auth_key = Some(vec![1; 256]);
+    {
+        let mut data = client.data.lock();
+        data.home_auth_key = Some(vec![1; 256]);
+        data.user_id = Some(42);
+        data.updates = cursor(100);
+    }
+    client
+        .policy
+        .main_session_allowance
+        .store(1, super::Ordering::Relaxed);
+    super::start_updates(handle).unwrap();
+
+    let started = Instant::now();
+    let received = started + Duration::from_millis(250);
+    let now = Cell::new(started);
+    let mut requests = Vec::new();
+    let mut drain = || {
+        super::drain_updates_with(
+            handle,
+            super::recovery_now,
+            || now.get(),
+            |_, _| panic!("unexpected bootstrap"),
+            |_, _, _, _, live, _| {
+                requests.push(live.pts);
+                if requests.len() == 1 {
+                    now.set(received);
+                    return Err(super::MtprotoError::Message("FLOOD_WAIT_17".into()));
+                }
+                live.pts = 105;
+                Ok((vec![message_event(11)], false))
+            },
+            |_, _, _, _, _, _| panic!("unexpected channel difference"),
+        )
+    };
+    assert!(matches!(
+        drain(),
+        Err(super::MtprotoError::Message(message)) if message == "FLOOD_WAIT_17"
+    ));
+    now.set(received + Duration::from_millis(16_999));
+    let pending = drain().unwrap();
+    assert!(!pending.replay_required);
+    assert!(pending.batches.is_empty());
+    assert!(pending_update_batches(handle).unwrap().is_empty());
+    assert_eq!(client.data.lock().updates, cursor(100));
+
+    now.set(received + Duration::from_millis(17_000));
+    let recovered = drain().unwrap();
+    assert_eq!(requests, [100, 100]);
+    assert_eq!(client.data.lock().updates, cursor(105));
+    assert_eq!(recovered.batches.len(), 1);
+    let batch = &recovered.batches[0];
+    assert_eq!(batch.cursor_after, cursor(105));
+    assert!(matches!(
+        batch.events.as_slice(),
+        [UpdateEventDto::MessagesDeleted { message_ids, .. }] if message_ids == &[11]
+    ));
+    acknowledge_update_batch(handle, batch.account_generation, batch.batch_id).unwrap();
+    assert!(pending_update_batches(handle).unwrap().is_empty());
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn channel_flood_wait_survives_watch_changes_and_gaps_until_the_exact_deadline() {
+    use mono_proto_types::peers::chat_id_for_channel;
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    let path = temp_session("channel-difference-flood-wait");
+    let handle = create_client(1, "hash".into(), path.to_string_lossy().into());
+    let client = get_client(handle).unwrap();
+    let chat = chat_id_for_channel(7);
+    let other = chat_id_for_channel(8);
+    client.main.lock().snapshot.auth_key = Some(vec![1; 256]);
+    {
+        let mut data = client.data.lock();
+        data.home_auth_key = Some(vec![1; 256]);
+        data.user_id = Some(42);
+        data.updates = cursor(1);
+        data.channel_pts.insert(chat, 100);
+        data.channel_pts.insert(other, 10);
+        data.last_history_chat_id = chat;
+    }
+    client
+        .policy
+        .main_session_allowance
+        .store(1, super::Ordering::Relaxed);
+    super::start_updates(handle).unwrap();
+
+    let epoch = Instant::now();
+    let elapsed = Cell::new(Duration::from_millis(500));
+    let received = Duration::from_millis(750);
+    let drain = |pending: &[i64], expected| {
+        let mut request = None;
+        let drained = super::drain_updates_with(
+            handle,
+            || 1_000 + elapsed.get().as_secs(),
+            || epoch + elapsed.get(),
+            |_, _| panic!("unexpected bootstrap"),
+            |_, _, _, _, _, gaps| {
+                gaps.extend_from_slice(pending);
+                Ok((vec![], false))
+            },
+            |_, _, _, _, id, pts| {
+                assert_eq!(request.replace((id, pts)), None);
+                assert_eq!(request, expected);
+                if elapsed.get() < received {
+                    elapsed.set(received);
+                    return Err(super::MtprotoError::Message(
+                        "RPC 420: FLOOD_WAIT_17".into(),
+                    ));
+                }
+                Ok(mono_proto_updates::rpc::ChannelDifferencePage {
+                    events: if id == chat {
+                        vec![UpdateEventDto::MessagesDeleted {
+                            chat_id: Some(chat),
+                            message_ids: vec![11],
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    pts: pts + 5,
+                    final_page: true,
+                    timeout: Some(3),
+                    pending_channels: vec![],
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(request, expected);
+        assert!(!drained.replay_required);
+        drained.batches
+    };
+    assert!(drain(&[], Some((chat, 100))).is_empty());
+    assert!(client.data.lock().channel_recovery[0].watching);
+
+    elapsed.set(received + Duration::from_millis(16_999));
+    assert!(drain(&[], None).is_empty());
+    super::clear_active_dialog(handle).unwrap();
+    client.data.lock().last_history_chat_id = chat;
+    assert!(drain(&[], None).is_empty());
+    assert!(drain(&[chat, other], Some((other, 10))).is_empty());
+    assert!(drain(&[chat], None).is_empty());
+    super::clear_active_dialog(handle).unwrap();
+    {
+        let data = client.data.lock();
+        assert_eq!(data.channel_pts[&chat], 100);
+        assert_eq!(data.channel_pts[&other], 15);
+        assert_eq!(data.channel_recovery.len(), 1);
+        assert_eq!(data.channel_recovery[0].chat_id, chat);
+        assert!(!data.channel_recovery[0].watching);
+    }
+    client.data.lock().last_history_chat_id = chat;
+
+    elapsed.set(received + Duration::from_millis(17_000));
+    let batches = drain(&[], Some((chat, 100)));
+    assert_eq!(batches.len(), 1);
+    let batch = &batches[0];
+    assert!(matches!(
+        batch.events.as_slice(),
+        [UpdateEventDto::MessagesDeleted { chat_id: Some(id), message_ids }]
+            if *id == chat && message_ids == &[11]
+    ));
+    assert_eq!(batch.channel_pts_after.len(), 1);
+    assert_eq!(batch.channel_pts_after[0].chat_id, chat);
+    assert_eq!(batch.channel_pts_after[0].pts, 105);
+    acknowledge_update_batch(handle, batch.account_generation, batch.batch_id).unwrap();
+    assert!(drain(&[], None).is_empty());
+    {
+        let data = client.data.lock();
+        assert_eq!(data.channel_pts[&chat], 105);
+        assert_eq!(data.channel_recovery.len(), 1);
+        assert!(data.channel_recovery[0].watching);
+    }
+    destroy_client(handle);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn lazy_channel_refresh_waits_until_the_exact_monotonic_deadline() {
+    use std::time::{Duration, Instant};
+
+    let epoch = Instant::now();
+    let received = epoch + Duration::from_millis(750);
+    assert!(super::lazy_retry_due(None, epoch));
+
+    let flood = super::MtprotoError::Message("FLOOD_WAIT_17".into());
+    let short_flood = super::MtprotoError::Message("FLOOD_WAIT_2".into());
+    for (error, wait) in [(None, 5), (Some(&short_flood), 5), (Some(&flood), 17)] {
+        let deadline = Some(super::lazy_retry_deadline(received, error));
+        let due = received + Duration::from_secs(wait);
+        assert!(!super::lazy_retry_due(
+            deadline,
+            due - Duration::from_millis(1),
+        ));
+        assert!(super::lazy_retry_due(deadline, due));
+    }
+}
+
+#[test]
 fn crash_before_the_journal_write_loses_nothing_the_cursor_did_not_claim() {
     let path = temp_session("before-save");
     let handle = create_client(1, "hash".into(), path.to_string_lossy().into());

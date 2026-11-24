@@ -1,6 +1,21 @@
 use crate::event_types::UpdateEventDto;
-use crate::message_types::MessageDto;
+use crate::message_types::{ChatDto, MessageDto};
 use crate::updates_state::UpdatesStateDto;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialogsCursorDto {
+    pub offset_date: i32,
+    pub offset_id: i32,
+    pub offset_peer_id: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DialogsPageDto {
+    pub chats: Vec<ChatDto>,
+    pub raw_count: i32,
+    pub next_cursor: Option<DialogsCursorDto>,
+    pub is_slice: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct FolderDto {
